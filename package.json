@@ -1,0 +1,16 @@
+{
+  "name": "page-dewarp-js",
+  "version": "0.1.0",
+  "description": "Page dewarping tool (JS port)",
+  "type": "module",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "dependencies": {
+    "fmin": "^0.0.4",
+    "fs-extra": "11.2.0",
+    "jimp": "^1.6.0",
+    "opencv-wasm": "^4.3.0-10",
+    "yargs": "^18.0.0"
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "name": "page-dewarp-benchmark",
+  "version": "1.0.0",
+  "description": "Benchmark tool for page-dewarp-js",
+  "main": "index.js",
+  "scripts": {
+    "test": "node index.js"
+  },
+  "dependencies": {
+    "chalk": "5.3.0",
+    "cli-table3": "0.6.3",
+    "fs-extra": "11.2.0",
+    "glob": "10.3.10",
+    "pixelmatch": "5.3.0",
+    "sharp": "0.33.2",
+    "ssim.js": "3.5.0",
+    "yargs": "17.7.2"
+  },
+  "type": "module"
+}

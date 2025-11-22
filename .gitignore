@@ -1,0 +1,14 @@
+# Node.js
+node_modules/
+dist/
+*.log
+.env
+
+# Mac OS
+.DS_Store
+
+# VSCode
+.vscode/
+
+# Output files
+*_thresh.png
