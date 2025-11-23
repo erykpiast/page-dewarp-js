@@ -1,6 +1,7 @@
 import path from "path";
 import { Config } from "./config.js";
 import { getOpenCV } from "./cv-loader.js";
+import { DebugMetrics } from "./debug-metrics.js";
 import { RemappedImage } from "./dewarp.js";
 import { Mask } from "./mask.js";
 import { minimize, optimiseParams } from "./optimise.js";
@@ -32,15 +33,49 @@ export class WarpedImage {
       )}`
     );
 
+    DebugMetrics.add("image_dims", {
+      original: { width: this.cv2_img.cols, height: this.cv2_img.rows },
+      resized: { width: this.small.cols, height: this.small.rows },
+    });
+
     console.log("  Calculating page extents...");
     this.calculatePageExtents();
+
+    DebugMetrics.add("page_extents", {
+      page_outline: this.page_outline,
+    });
 
     console.log("  Detecting contours...");
     this.contour_list = this.contourInfo(true); // text=true
     console.log(`  Found ${this.contour_list.length} initial text contours`);
 
+    DebugMetrics.add("contours_count", this.contour_list.length);
+    DebugMetrics.add(
+      "contours_sample",
+      this.contour_list.slice(0, 5).map((c) => ({
+        x: c.x,
+        y: c.y,
+        width: c.width,
+        height: c.height,
+      }))
+    );
+
     console.log("  Assembling spans...");
     let spans = this.iterativelyAssembleSpans();
+
+    DebugMetrics.add("spans_count", spans.length);
+    DebugMetrics.add(
+      "spans_sample",
+      spans.slice(0, 5).map((span) => ({
+        x0: span.xmin,
+        x1: span.xmax,
+        y_start: span.ypred && span.ypred.length > 0 ? span.ypred[0] : null,
+        y_end:
+          span.ypred && span.ypred.length > 0
+            ? span.ypred[span.ypred.length - 1]
+            : null,
+      }))
+    );
 
     if (spans.length < 1) {
       console.log(`skipping ${this.stem} because only ${spans.length} spans`);
@@ -61,6 +96,13 @@ export class WarpedImage {
       spanPoints
     );
 
+    const allKeypoints = [
+      ...corners,
+      ...xcoords.map((x, i) => [x, ycoords[i]]),
+    ];
+    DebugMetrics.add("keypoints_count", allKeypoints.length);
+    DebugMetrics.add("keypoints_sample", allKeypoints.slice(0, 10));
+
     console.log("  Getting default params...");
     let {
       pageDims: roughDims,
@@ -70,6 +112,8 @@ export class WarpedImage {
 
     console.log("  Optimizing params...");
     const dstpoints = [corners[0]].concat(spanPoints.flat());
+
+    DebugMetrics.add("dstpoints", dstpoints);
 
     params = await optimiseParams(
       this.stem,
@@ -81,6 +125,8 @@ export class WarpedImage {
 
     console.log("  Optimizing page dims...");
     let pageDims = await this.getPageDims(corners, roughDims, params);
+
+    DebugMetrics.add("page_dims", pageDims);
 
     if (pageDims[0] < 0 || pageDims[1] < 0) {
       console.log(
@@ -96,6 +142,9 @@ export class WarpedImage {
     console.log("  Thresholding/Remapping...");
     await this.threshold(pageDims, params);
     this.written = true;
+
+    DebugMetrics.save(`debug/${this.stem}_metrics_js.json`);
+
     console.log("  Done.");
   }
 

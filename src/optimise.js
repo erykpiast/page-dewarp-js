@@ -1,5 +1,6 @@
 import { Config } from "./config.js";
 import { getOpenCV } from "./cv-loader.js";
+import { DebugMetrics } from "./debug-metrics.js";
 import { debugShow } from "./debug.js";
 import { makeKeypointIndex, projectKeypoints } from "./keypoints.js";
 import { norm2pix } from "./utils.js";
@@ -161,6 +162,9 @@ export async function optimiseParams(
   const initialLoss = objective(params);
   console.log(`  initial objective is ${initialLoss}`);
 
+  DebugMetrics.add("initial_params", Array.from(params));
+  DebugMetrics.add("initial_cost", initialLoss);
+
   if (Config.DEBUG_LEVEL >= 1) {
     const projpts = projectKeypoints(params, keypointIndex);
     await drawCorrespondences(
@@ -184,10 +188,15 @@ export async function optimiseParams(
   });
   const end = Date.now();
 
-  console.log(`  optimization took ${(end - start) / 1000} sec.`);
+  const optimizationTime = (end - start) / 1000;
+  console.log(`  optimization took ${optimizationTime} sec.`);
   console.log(`  final objective is ${solution.fx}`);
 
   const newParams = solution.x;
+
+  DebugMetrics.add("final_params", newParams);
+  DebugMetrics.add("final_cost", solution.fx);
+  DebugMetrics.add("optimization_time", optimizationTime);
 
   if (Config.DEBUG_LEVEL >= 1) {
     const projpts = projectKeypoints(newParams, keypointIndex);
