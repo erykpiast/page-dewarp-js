@@ -1,11 +1,7 @@
 import { Config } from "./config.js";
-import { getOpenCV } from "./cv-loader.js";
-import { minimize } from "./optimise.js";
-import { projectXY } from "./projection.js";
+import { solvePnP } from "./solvepnp/index.js";
 
 export function getDefaultParams(corners, ycoords, xcoords) {
-  const cv = getOpenCV();
-
   function dist(p1, p2) {
     return Math.sqrt(Math.pow(p1[0] - p2[0], 2) + Math.pow(p1[1] - p2[1], 2));
   }
@@ -13,155 +9,46 @@ export function getDefaultParams(corners, ycoords, xcoords) {
   const pageWidth = dist(corners[0], corners[1]);
   const pageHeight = dist(corners[0], corners[3]);
 
-  const srcPtsData = []; // Object points (x,y)
-  const dstPtsData = []; // Image points (u,v)
+  // Construct 3D object points (Z=0) matching the 4 corners order
+  // corners: [top-left, top-right, bottom-right, bottom-left] (usually)
+  // Mapping:
+  // 0 -> (0,0)
+  // 1 -> (w,0)
+  // 2 -> (w,h)
+  // 3 -> (0,h)
 
-  // 0,0 -> c0
-  srcPtsData.push(0, 0);
-  dstPtsData.push(corners[0][0], corners[0][1]);
-  // w,0 -> c1
-  srcPtsData.push(pageWidth, 0);
-  dstPtsData.push(corners[1][0], corners[1][1]);
-  // w,h -> c2
-  srcPtsData.push(pageWidth, pageHeight);
-  dstPtsData.push(corners[2][0], corners[2][1]);
-  // 0,h -> c3
-  srcPtsData.push(0, pageHeight);
-  dstPtsData.push(corners[3][0], corners[3][1]);
+  const objectPoints = [
+    [0, 0, 0],
+    [pageWidth, 0, 0],
+    [pageWidth, pageHeight, 0],
+    [0, pageHeight, 0],
+  ];
 
-  const srcMat = cv.matFromArray(4, 1, cv.CV_32FC2, srcPtsData);
-  const dstMat = cv.matFromArray(4, 1, cv.CV_32FC2, dstPtsData);
+  const imagePoints = corners; // Already in array of [u, v] format?
+  // corners is likely array of [x, y] arrays.
 
-  const H = cv.findHomography(srcMat, dstMat);
-
-  // Decompose H to R, t
   const f = Config.FOCAL_LENGTH;
-
-  const h00 = H.doubleAt(0, 0),
-    h01 = H.doubleAt(0, 1),
-    h02 = H.doubleAt(0, 2);
-  const h10 = H.doubleAt(1, 0),
-    h11 = H.doubleAt(1, 1),
-    h12 = H.doubleAt(1, 2);
-  const h20 = H.doubleAt(2, 0),
-    h21 = H.doubleAt(2, 1),
-    h22 = H.doubleAt(2, 2);
-
-  // Multiply by K_inv
-  // r1' = [h00/f, h10/f, h20]
-  let r1x = h00 / f,
-    r1y = h10 / f,
-    r1z = h20;
-  let r2x = h01 / f,
-    r2y = h11 / f,
-    r2z = h21;
-  let tx = h02 / f,
-    ty = h12 / f,
-    tz = h22;
-
-  // Normalize r1
-  const norm1 = Math.sqrt(r1x * r1x + r1y * r1y + r1z * r1z);
-  r1x /= norm1;
-  r1y /= norm1;
-  r1z /= norm1;
-
-  // Normalize r2
-  const norm2 = Math.sqrt(r2x * r2x + r2y * r2y + r2z * r2z);
-
-  const scale = (norm1 + norm2) / 2;
-  r2x /= scale;
-  r2y /= scale;
-  r2z /= scale;
-  tx /= scale;
-  ty /= scale;
-  tz /= scale;
-
-  // Enforce orthogonality: r3 = r1 x r2
-  let r3x = r1y * r2z - r1z * r2y;
-  let r3y = r1z * r2x - r1x * r2z;
-  let r3z = r1x * r2y - r1y * r2x;
-
-  // Normalize r3
-  const norm3 = Math.sqrt(r3x * r3x + r3y * r3y + r3z * r3z);
-  r3x /= norm3;
-  r3y /= norm3;
-  r3z /= norm3;
-
-  // Recompute r2 = r3 x r1
-  r2x = r3y * r1z - r3z * r1y;
-  r2y = r3z * r1x - r3x * r1z;
-  r2z = r3x * r1y - r3y * r1x;
-
-  // Rotation matrix R
-  const R_data = [r1x, r2x, r3x, r1y, r2y, r3y, r1z, r2z, r3z];
-  const R = cv.matFromArray(3, 3, cv.CV_64F, R_data);
-
-  const rvec = new cv.Mat();
-  cv.Rodrigues(R, rvec);
-
-  // Initial rvec and tvec from Homography
-  let currentRvec = [
-    rvec.doubleAt(0, 0),
-    rvec.doubleAt(1, 0),
-    rvec.doubleAt(2, 0),
-  ];
-  let currentTvec = [tx, ty, tz];
-
-  // Refine using Iterative Optimization (similar to SOLVEPNP_ITERATIVE)
-  // Minimize reprojection error of the 4 corners
-
-  const objCorners2D = [
-    [0, 0],
-    [pageWidth, 0],
-    [pageWidth, pageHeight],
-    [0, pageHeight],
-  ];
-
-  function pnpObjective(params6) {
-    // params6 is [rx, ry, rz, tx, ty, tz]
-    // projectXY expects full pvec. We construct a dummy one with 0 cubic terms.
-    const rvecData = params6.slice(0, 3);
-    const tvecData = params6.slice(3, 6);
-
-    // Full pvec structure: [rx,ry,rz, tx,ty,tz, alpha, beta]
-    const fullPvec = [...rvecData, ...tvecData, 0.0, 0.0];
-
-    // projectXY uses the same K as we assumed (from Config)
-    const projected = projectXY(objCorners2D, fullPvec);
-
-    let err = 0;
-    for (let i = 0; i < 4; i++) {
-      const dx = projected[i][0] - corners[i][0];
-      const dy = projected[i][1] - corners[i][1];
-      err += dx * dx + dy * dy;
-    }
-    return err;
-  }
-
-  const initialParams6 = [...currentRvec, ...currentTvec];
+  const cameraMatrix = [f, 0, 0, 0, f, 0, 0, 0, 1];
+  const distCoeffs = []; // No distortion assumed for initial guess
 
   if (Config.DEBUG_LEVEL >= 1) {
-    console.log(`  Initial PnP Error: ${pnpObjective(initialParams6)}`);
+    console.log(`  Running solvePnP on ${objectPoints.length} points...`);
   }
 
-  // Use the minimize function we implemented (Coordinate Descent)
-  const refined = minimize(pnpObjective, initialParams6, {
-    maxIter: 50,
-    tol: 1e-6,
-  });
+  const solution = solvePnP(
+    objectPoints,
+    imagePoints,
+    cameraMatrix,
+    distCoeffs
+  );
 
   if (Config.DEBUG_LEVEL >= 1) {
-    console.log(`  Refined PnP Error: ${refined.fx}`);
+    console.log(`  solvePnP success: ${solution.success}`);
+    console.log(`  rvec: ${solution.rvec}`);
+    console.log(`  tvec: ${solution.tvec}`);
   }
 
-  const refinedParams = refined.x;
-
-  // Cleanup
-  srcMat.delete();
-  dstMat.delete();
-  H.delete();
-  R.delete();
-  rvec.delete();
+  const refinedParams = [...solution.rvec, ...solution.tvec];
 
   const spanCounts = xcoords.map((xc) => xc.length);
 

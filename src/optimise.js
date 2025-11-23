@@ -30,8 +30,10 @@ function bracketMinimum(f, x0, s = 0.1) {
 
   let iter = 0;
   while (fc < fb && iter < 50) {
-    a = b; fa = fb;
-    b = c; fb = fc;
+    a = b;
+    fa = fb;
+    b = c;
+    fb = fc;
     s *= 1.618;
     c = b + s;
     fc = f(c);
@@ -39,7 +41,9 @@ function bracketMinimum(f, x0, s = 0.1) {
   }
 
   if (a > c) {
-      const tmp = a; a = c; c = tmp;
+    const tmp = a;
+    a = c;
+    c = tmp;
   }
   return { a, b, c };
 }
@@ -64,7 +68,10 @@ function goldenSectionSearch(f, a, b, c, tol) {
   let f2 = f(x2);
 
   let iter = 0;
-  while (Math.abs(x3 - x0) > tol * (Math.abs(x1) + Math.abs(x2)) && iter < 100) {
+  while (
+    Math.abs(x3 - x0) > tol * (Math.abs(x1) + Math.abs(x2)) &&
+    iter < 100
+  ) {
     if (f2 < f1) {
       x0 = x1;
       x1 = x2;
@@ -85,8 +92,8 @@ function goldenSectionSearch(f, a, b, c, tol) {
 }
 
 function optimize1D(f, x0, tol) {
-    const { a, b, c } = bracketMinimum(f, x0);
-    return goldenSectionSearch(f, a, b, c, tol);
+  const { a, b, c } = bracketMinimum(f, x0);
+  return goldenSectionSearch(f, a, b, c, tol);
 }
 
 // --- Main Minimize Function ---
@@ -104,27 +111,27 @@ export function minimize(objective, initialParams, options = {}) {
     const startFx = currentFx;
 
     for (let i = 0; i < N; i++) {
-        // Optimize parameter i
-        const f1d = (val) => {
-            const oldVal = x[i];
-            x[i] = val;
-            const res = objective(x);
-            x[i] = oldVal; // Restore
-            return res;
-        };
+      // Optimize parameter i
+      const f1d = (val) => {
+        const oldVal = x[i];
+        x[i] = val;
+        const res = objective(x);
+        x[i] = oldVal; // Restore
+        return res;
+      };
 
-        const bestVal = optimize1D(f1d, x[i], tol);
-        x[i] = bestVal;
-        
-        currentFx = objective(x);
+      const bestVal = optimize1D(f1d, x[i], tol);
+      x[i] = bestVal;
+
+      currentFx = objective(x);
     }
 
-    if (log && (iter % 1 === 0)) {
+    if (log && iter % 1 === 0) {
       console.log(`  iter ${iter}: loss ${currentFx.toFixed(4)}`);
     }
 
     if (Math.abs(startFx - currentFx) < tol) {
-        break;
+      break;
     }
   }
 
@@ -165,12 +172,14 @@ export async function optimiseParams(
     );
   }
 
-  console.log(`  optimizing ${params.length} parameters using Coordinate Descent...`);
+  console.log(
+    `  optimizing ${params.length} parameters using Coordinate Descent...`
+  );
 
   const start = Date.now();
   const solution = minimize(objective, params, {
     log: true,
-    maxIter: 20, 
+    maxIter: 20,
     tol: 1e-4,
   });
   const end = Date.now();
