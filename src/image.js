@@ -8,6 +8,7 @@ import { projectXY } from "./projection.js";
 import { getDefaultParams } from "./solve.js";
 import { assembleSpans, keypointsFromSamples, sampleSpans } from "./spans.js";
 import { imgsize, jimpToMat, loadJimpImage } from "./utils.js";
+import { drawProjectedGrid } from "./visualization.js";
 
 export class WarpedImage {
   constructor(imgfile) {
@@ -86,6 +87,10 @@ export class WarpedImage {
         "Got a negative page dimension! Falling back to rough estimate"
       );
       pageDims = roughDims;
+    }
+
+    if (Config.DEBUG_LEVEL >= 1) {
+      await drawProjectedGrid(this.stem, this.small, params, pageDims);
     }
 
     console.log("  Thresholding/Remapping...");
