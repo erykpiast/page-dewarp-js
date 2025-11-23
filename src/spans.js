@@ -183,73 +183,103 @@ export function keypointsFromSamples(
 ) {
   const cv = getOpenCV();
 
-  // PCA on all points combined
-  // Combine all points
-  const allPoints = spanPoints.flat();
-  if (allPoints.length === 0) {
-    // Fallback or error?
-    return { corners: [], ycoords: [], xcoords: [] };
-  }
+  // Helper for PCA on a set of points
+  function getPrincipalAxis(points) {
+    if (points.length < 2) return [1, 0];
 
-  // Manual PCA on allPoints (N x 2)
-  // 1. Mean
-  let sumX = 0,
-    sumY = 0;
-  for (const p of allPoints) {
-    sumX += p[0];
-    sumY += p[1];
-  }
-  const meanX = sumX / allPoints.length;
-  const meanY = sumY / allPoints.length;
-
-  // 2. Covariance (2x2)
-  // sum((p - mean)*(p-mean)^T)
-  let cXX = 0,
-    cXY = 0,
-    cYY = 0;
-  for (const p of allPoints) {
-    const dx = p[0] - meanX;
-    const dy = p[1] - meanY;
-    cXX += dx * dx;
-    cXY += dx * dy;
-    cYY += dy * dy;
-  }
-
-  // We don't need to divide by N for direction finding, but for correctness:
-  // cXX /= allPoints.length; cXY /= allPoints.length; cYY /= allPoints.length;
-
-  // 3. Eigen
-  const T = cXX + cYY;
-  const D = cXX * cYY - cXY * cXY;
-  const L1 = T / 2 + Math.sqrt(Math.max(0, (T * T) / 4 - D));
-
-  let vx, vy;
-  if (Math.abs(cXY) > 1e-9) {
-    const diff = cXX - L1;
-    const theta = Math.atan2(-diff, cXY);
-    vx = Math.cos(theta);
-    vy = Math.sin(theta);
-  } else {
-    if (cXX >= cYY) {
-      vx = 1;
-      vy = 0;
-    } else {
-      vx = 0;
-      vy = 1;
+    let sumX = 0,
+      sumY = 0;
+    for (const p of points) {
+      sumX += p[0];
+      sumY += p[1];
     }
+    const meanX = sumX / points.length;
+    const meanY = sumY / points.length;
+
+    let cXX = 0,
+      cXY = 0,
+      cYY = 0;
+    for (const p of points) {
+      const dx = p[0] - meanX;
+      const dy = p[1] - meanY;
+      cXX += dx * dx;
+      cXY += dx * dy;
+      cYY += dy * dy;
+    }
+
+    const T = cXX + cYY;
+    const D = cXX * cYY - cXY * cXY;
+    const L1 = T / 2 + Math.sqrt(Math.max(0, (T * T) / 4 - D));
+
+    let vx, vy;
+    if (Math.abs(cXY) > 1e-9) {
+      const diff = cXX - L1;
+      const theta = Math.atan2(-diff, cXY);
+      vx = Math.cos(theta);
+      vy = Math.sin(theta);
+    } else {
+      if (cXX >= cYY) {
+        vx = 1;
+        vy = 0;
+      } else {
+        vx = 0;
+        vy = 1;
+      }
+    }
+
+    // Ensure vector points roughly left-to-right (positive x)
+    // effectively aligning with text direction
+    if (vx < 0) {
+      vx = -vx;
+      vy = -vy;
+    }
+
+    return [vx, vy];
   }
 
-  let x_dir = [vx, vy];
-  if (x_dir[0] < 0) x_dir = [-vx, -vy];
+  // Weighted average of local PCAs
+  let allEvecX = 0;
+  let allEvecY = 0;
+  let allWeights = 0;
 
+  for (const points of spanPoints) {
+    if (points.length < 2) continue;
+
+    const [vx, vy] = getPrincipalAxis(points);
+    const pFirst = points[0];
+    const pLast = points[points.length - 1];
+
+    // Weight by span length
+    const weight = Math.sqrt(
+      Math.pow(pLast[0] - pFirst[0], 2) + Math.pow(pLast[1] - pFirst[1], 2)
+    );
+
+    allEvecX += vx * weight;
+    allEvecY += vy * weight;
+    allWeights += weight;
+  }
+
+  // Handle case with no valid spans
+  if (allWeights === 0) {
+    allEvecX = 1;
+    allEvecY = 0;
+    allWeights = 1;
+  }
+
+  const avgVx = allEvecX / allWeights;
+  const avgVy = allEvecY / allWeights;
+
+  // Normalize
+  const norm = Math.sqrt(avgVx * avgVx + avgVy * avgVy);
+  let x_dir = [avgVx / norm, avgVy / norm];
+
+  if (x_dir[0] < 0) x_dir = [-x_dir[0], -x_dir[1]];
   const y_dir = [-x_dir[1], x_dir[0]];
 
   // Page corners from page_outline (pixels) -> normalized -> projected to axes
-  // page_outline is array of [x,y]
   const pageCoordsNorm = pix2norm(pagemask, page_outline);
 
   // Project pageCoordsNorm onto x_dir and y_dir
-  // dot product
   const px_coords = pageCoordsNorm.map(
     (p) => p[0] * x_dir[0] + p[1] * x_dir[1]
   );
@@ -261,14 +291,6 @@ export function keypointsFromSamples(
   const px1 = Math.max(...px_coords);
   const py0 = Math.min(...py_coords);
   const py1 = Math.max(...py_coords);
-
-  // Corners:
-  // c0: px0, py0
-  // c1: px1, py0
-  // c2: px1, py1
-  // c3: px0, py1
-  // But using the directions:
-  // point = val_x * x_dir + val_y * y_dir
 
   function getCorner(cx, cy) {
     return [cx * x_dir[0] + cy * y_dir[0], cx * x_dir[1] + cy * y_dir[1]];
@@ -295,8 +317,6 @@ export function keypointsFromSamples(
     const meanY = py.reduce((a, b) => a + b, 0) / py.length;
     ycoords.push(meanY - py0);
   }
-
-  // dataMat.delete(); mean.delete(); eigenvectors.delete(); eigenvalues.delete(); // Removed manual PCA cleanup
 
   if (Config.DEBUG_LEVEL >= 2) {
     visualizeSpanPoints(name, small, spanPoints, corners);

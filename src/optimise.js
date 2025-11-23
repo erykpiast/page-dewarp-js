@@ -4,55 +4,131 @@ import { debugShow } from "./debug.js";
 import { makeKeypointIndex, projectKeypoints } from "./keypoints.js";
 import { norm2pix } from "./utils.js";
 
-export function minimize(objective, initialParams, options = {}) {
-  const alpha = options.alpha || 0.01;
-  const beta1 = options.beta1 || 0.9;
-  const beta2 = options.beta2 || 0.999;
-  const epsilon = options.epsilon || 1e-8;
-  const maxIter = options.maxIter || 200;
-  const h = options.h || 1e-4;
-  const tol = options.tol || 1e-4;
+// --- Optimization Helpers (Coordinate Descent / Golden Section) ---
 
-  let theta = Float64Array.from(initialParams);
-  const m = new Float64Array(theta.length).fill(0);
-  const v = new Float64Array(theta.length).fill(0);
-  const N = theta.length;
+function bracketMinimum(f, x0, s = 0.1) {
+  let a = x0;
+  let b = x0 + s;
+  let fa = f(a);
+  let fb = f(b);
 
-  let currentLoss = objective(theta);
-
-  for (let t = 1; t <= maxIter; t++) {
-    // Compute gradients (finite difference)
-    const grads = new Float64Array(N);
-    for (let i = 0; i < N; i++) {
-      const oldVal = theta[i];
-      theta[i] = oldVal + h;
-      const lossP = objective(theta);
-      theta[i] = oldVal;
-      grads[i] = (lossP - currentLoss) / h;
+  if (fb > fa) {
+    s = -s;
+    b = x0 + s;
+    fb = f(b);
+    if (fb > fa) {
+      // Bracketed: x0-s < x0 < x0+s (if initial s was positive)
+      // a=x0, b=x0+s (bad), new_b=x0-s (bad)
+      // points: x0-s, x0, x0+s
+      // fa was min.
+      return { a: x0 - Math.abs(s), b: x0, c: x0 + Math.abs(s) };
     }
-
-    // Adam update
-    for (let i = 0; i < N; i++) {
-      const g = grads[i];
-      m[i] = beta1 * m[i] + (1 - beta1) * g;
-      v[i] = beta2 * v[i] + (1 - beta2) * g * g;
-
-      const mHat = m[i] / (1 - Math.pow(beta1, t));
-      const vHat = v[i] / (1 - Math.pow(beta2, t));
-
-      theta[i] = theta[i] - (alpha * mHat) / (Math.sqrt(vHat) + epsilon);
-    }
-
-    currentLoss = objective(theta); // Recompute loss at new theta
-
-    if (options.log && t % 20 === 0) {
-      console.log(`  iter ${t}: loss ${currentLoss.toFixed(4)}`);
-    }
-
-    if (currentLoss < tol) break;
   }
 
-  return { x: Array.from(theta), fx: currentLoss };
+  let c = b + s;
+  let fc = f(c);
+
+  let iter = 0;
+  while (fc < fb && iter < 50) {
+    a = b; fa = fb;
+    b = c; fb = fc;
+    s *= 1.618;
+    c = b + s;
+    fc = f(c);
+    iter++;
+  }
+
+  if (a > c) {
+      const tmp = a; a = c; c = tmp;
+  }
+  return { a, b, c };
+}
+
+function goldenSectionSearch(f, a, b, c, tol) {
+  const phi = 1.61803398875;
+  const resphi = 2 - phi;
+
+  let x0 = a;
+  let x3 = c;
+  let x1, x2;
+
+  if (Math.abs(c - b) > Math.abs(b - a)) {
+    x1 = b;
+    x2 = b + resphi * (c - b);
+  } else {
+    x2 = b;
+    x1 = b - resphi * (b - a);
+  }
+
+  let f1 = f(x1);
+  let f2 = f(x2);
+
+  let iter = 0;
+  while (Math.abs(x3 - x0) > tol * (Math.abs(x1) + Math.abs(x2)) && iter < 100) {
+    if (f2 < f1) {
+      x0 = x1;
+      x1 = x2;
+      x2 = resphi * x1 + (1 - resphi) * x3;
+      f1 = f2;
+      f2 = f(x2);
+    } else {
+      x3 = x2;
+      x2 = x1;
+      x1 = resphi * x2 + (1 - resphi) * x0;
+      f2 = f1;
+      f1 = f(x1);
+    }
+    iter++;
+  }
+
+  return f1 < f2 ? x1 : x2;
+}
+
+function optimize1D(f, x0, tol) {
+    const { a, b, c } = bracketMinimum(f, x0);
+    return goldenSectionSearch(f, a, b, c, tol);
+}
+
+// --- Main Minimize Function ---
+
+export function minimize(objective, initialParams, options = {}) {
+  const maxIter = options.maxIter || 20;
+  const tol = options.tol || 1e-4;
+  const log = options.log || false;
+
+  let x = Float64Array.from(initialParams);
+  const N = x.length;
+  let currentFx = objective(x);
+
+  for (let iter = 1; iter <= maxIter; iter++) {
+    const startFx = currentFx;
+
+    for (let i = 0; i < N; i++) {
+        // Optimize parameter i
+        const f1d = (val) => {
+            const oldVal = x[i];
+            x[i] = val;
+            const res = objective(x);
+            x[i] = oldVal; // Restore
+            return res;
+        };
+
+        const bestVal = optimize1D(f1d, x[i], tol);
+        x[i] = bestVal;
+        
+        currentFx = objective(x);
+    }
+
+    if (log && (iter % 1 === 0)) {
+      console.log(`  iter ${iter}: loss ${currentFx.toFixed(4)}`);
+    }
+
+    if (Math.abs(startFx - currentFx) < tol) {
+        break;
+    }
+  }
+
+  return { x: Array.from(x), fx: currentFx };
 }
 
 export async function optimiseParams(
@@ -89,13 +165,12 @@ export async function optimiseParams(
     );
   }
 
-  console.log(`  optimizing ${params.length} parameters using Adam...`);
+  console.log(`  optimizing ${params.length} parameters using Coordinate Descent...`);
 
   const start = Date.now();
   const solution = minimize(objective, params, {
     log: true,
-    maxIter: 500,
-    alpha: 0.01,
+    maxIter: 20, 
     tol: 1e-4,
   });
   const end = Date.now();

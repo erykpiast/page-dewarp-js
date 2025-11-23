@@ -24,5 +24,5 @@ export function getOpenCV() {
   if (!opencv.cv) {
     throw new Error("OpenCV not loaded properly?");
   }
-  return opencv.cv; // Hopefully already stripped if load called
+  return opencv.cv; 
 }
