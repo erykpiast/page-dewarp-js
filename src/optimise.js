@@ -169,6 +169,75 @@ function lineSearchAlongDirection(x, direction, objective, tol, scratch) {
   return { alpha, fx };
 }
 
+function initializeDirections(n) {
+  const directions = [];
+  for (let i = 0; i < n; i++) {
+    const dir = new Float64Array(n);
+    dir[i] = 1;
+    directions.push(dir);
+  }
+  return directions;
+}
+
+function powellIteration(x, directions, objective, tol, scratch, xOld, pt, delta) {
+  const n = x.length;
+  xOld.set(x);
+  const fxOld = objective(x);
+  let fx = fxOld;
+  let biggestDecrease = 0;
+  let biggestIdx = -1;
+
+  for (let i = 0; i < n; i++) {
+    const dir = directions[i];
+    const fBefore = fx;
+    const { alpha, fx: fxAfter } = lineSearchAlongDirection(
+      x,
+      dir,
+      objective,
+      tol,
+      scratch
+    );
+    if (alpha !== 0) {
+      const decrease = fBefore - fxAfter;
+      if (decrease > biggestDecrease) {
+        biggestDecrease = decrease;
+        biggestIdx = i;
+      }
+      fx = fxAfter;
+    }
+  }
+
+  let converged = Math.abs(fxOld - fx) < tol;
+
+  for (let i = 0; i < n; i++) {
+    delta[i] = x[i] - xOld[i];
+    pt[i] = x[i] + delta[i];
+  }
+
+  const fpt = objective(pt);
+  if (
+    fpt < fx &&
+    biggestIdx !== -1 &&
+    2 * (fxOld - 2 * fx + fpt) * Math.pow(fxOld - fx - biggestDecrease, 2) <
+      biggestDecrease * Math.pow(fxOld - fpt, 2)
+  ) {
+    const { alpha, fx: fxAfter } = lineSearchAlongDirection(
+      x,
+      delta,
+      objective,
+      tol,
+      scratch
+    );
+    if (alpha !== 0) {
+      fx = fxAfter;
+      directions[biggestIdx] = Float64Array.from(delta);
+      converged = false;
+    }
+  }
+
+  return { fx, converged };
+}
+
 /**
  * Implements Powell's method (derivative-free optimization using sequential 1D line searches).
  * @param {Function} objective
@@ -185,71 +254,24 @@ export function minimize(objective, initialParams, options = {}) {
   const n = x.length;
   let fx = objective(x);
 
-  const directions = [];
-  for (let i = 0; i < n; i++) {
-    const dir = new Float64Array(n);
-    dir[i] = 1;
-    directions.push(dir);
-  }
-
+  const directions = initializeDirections(n);
   const scratch = new Float64Array(n);
   const xOld = new Float64Array(n);
   const pt = new Float64Array(n);
   const delta = new Float64Array(n);
 
   for (let iter = 1; iter <= maxIter; iter++) {
-    xOld.set(x);
-    const fxOld = fx;
-    let biggestDecrease = 0;
-    let biggestIdx = -1;
-
-    for (let i = 0; i < n; i++) {
-      const dir = directions[i];
-      const fBefore = fx;
-      const { alpha, fx: fxAfter } = lineSearchAlongDirection(
-        x,
-        dir,
-        objective,
-        tol,
-        scratch
-      );
-      if (alpha !== 0) {
-        const decrease = fBefore - fxAfter;
-        if (decrease > biggestDecrease) {
-          biggestDecrease = decrease;
-          biggestIdx = i;
-        }
-        fx = fxAfter;
-      }
-    }
-
-    let converged = Math.abs(fxOld - fx) < tol;
-
-    for (let i = 0; i < n; i++) {
-      delta[i] = x[i] - xOld[i];
-      pt[i] = x[i] + delta[i];
-    }
-
-    const fpt = objective(pt);
-    if (
-      fpt < fx &&
-      biggestIdx !== -1 &&
-      2 * (fxOld - 2 * fx + fpt) * Math.pow(fxOld - fx - biggestDecrease, 2) <
-        biggestDecrease * Math.pow(fxOld - fpt, 2)
-    ) {
-      const { alpha, fx: fxAfter } = lineSearchAlongDirection(
-        x,
-        delta,
-        objective,
-        tol,
-        scratch
-      );
-      if (alpha !== 0) {
-        fx = fxAfter;
-        directions[biggestIdx] = Float64Array.from(delta);
-        converged = false;
-      }
-    }
+    const { fx: fxNew, converged } = powellIteration(
+      x,
+      directions,
+      objective,
+      tol,
+      scratch,
+      xOld,
+      pt,
+      delta
+    );
+    fx = fxNew;
 
     if (log) {
       console.log(`  iter ${iter}: loss ${fx.toFixed(4)}`);

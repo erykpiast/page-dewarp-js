@@ -108,16 +108,7 @@ function generateCandidateEdge(cinfoA, cinfoB, statsTracker) {
   return { score, cinfoA, cinfoB };
 }
 
-/**
- * Groups contours into horizontal text lines using proximity/alignment scoring.
- * @param {string} name
- * @param {cv.Mat} small
- * @param {cv.Mat} pagemask
- * @param {Array<ContourInfo>} cinfoList
- * @returns {{ spans: Array<Array<ContourInfo>>, stats: Object }}
- */
-export function assembleSpans(name, small, pagemask, cinfoList) {
-  // Sort by y, then x/width/height for determinism
+function sortContoursForAssembly(cinfoList) {
   cinfoList.sort(
     (a, b) =>
       a.rect.y - b.rect.y ||
@@ -129,25 +120,9 @@ export function assembleSpans(name, small, pagemask, cinfoList) {
     cinfo.debugIndex = idx;
     cinfo.debugId = `${cinfo.rect.x},${cinfo.rect.y},${cinfo.rect.width},${cinfo.rect.height}`;
   });
+}
 
-  const stats = {
-    candidatePairs: 0,
-    validEdges: 0,
-    rejectionBreakdown: {
-      distance: 0,
-      overlap: 0,
-      angle: 0,
-    },
-    linkedContours: 0,
-    spanSizes: [],
-    spanWidths: [],
-    acceptedMetrics: {
-      distance: { sum: 0, min: Infinity, max: -Infinity, count: 0 },
-      overlap: { sum: 0, min: Infinity, max: -Infinity, count: 0 },
-      angle: { sum: 0, min: Infinity, max: -Infinity, count: 0 },
-    },
-    edgeDiagnostics: [],
-  };
+function generateAllCandidateEdges(cinfoList, stats) {
   const candidateEdges = [];
 
   for (let i = 0; i < cinfoList.length; i++) {
@@ -161,6 +136,10 @@ export function assembleSpans(name, small, pagemask, cinfoList) {
     }
   }
 
+  return candidateEdges;
+}
+
+function linkContours(candidateEdges) {
   candidateEdges.sort((a, b) => a.score - b.score);
 
   for (const { cinfoA, cinfoB } of candidateEdges) {
@@ -169,8 +148,9 @@ export function assembleSpans(name, small, pagemask, cinfoList) {
       cinfoB.pred = cinfoA;
     }
   }
-  stats.linkedContours = cinfoList.filter((c) => c.succ || c.pred).length;
+}
 
+function extractSpans(cinfoList, stats) {
   const spans = [];
   const listCopy = [...cinfoList];
 
@@ -197,6 +177,46 @@ export function assembleSpans(name, small, pagemask, cinfoList) {
     }
   }
 
+  return spans;
+}
+
+/**
+ * Groups contours into horizontal text lines using proximity/alignment scoring.
+ * @param {string} name
+ * @param {cv.Mat} small
+ * @param {cv.Mat} pagemask
+ * @param {Array<ContourInfo>} cinfoList
+ * @returns {{ spans: Array<Array<ContourInfo>>, stats: Object }}
+ */
+export function assembleSpans(name, small, pagemask, cinfoList) {
+  sortContoursForAssembly(cinfoList);
+
+  const stats = {
+    candidatePairs: 0,
+    validEdges: 0,
+    rejectionBreakdown: {
+      distance: 0,
+      overlap: 0,
+      angle: 0,
+    },
+    linkedContours: 0,
+    spanSizes: [],
+    spanWidths: [],
+    acceptedMetrics: {
+      distance: { sum: 0, min: Infinity, max: -Infinity, count: 0 },
+      overlap: { sum: 0, min: Infinity, max: -Infinity, count: 0 },
+      angle: { sum: 0, min: Infinity, max: -Infinity, count: 0 },
+    },
+    edgeDiagnostics: [],
+  };
+
+  const candidateEdges = generateAllCandidateEdges(cinfoList, stats);
+  linkContours(candidateEdges);
+  
+  stats.linkedContours = cinfoList.filter((c) => c.succ || c.pred).length;
+  
+  const spans = extractSpans(cinfoList, stats);
+
   if (Config.DEBUG_LEVEL >= 2) {
     visualizeSpans(name, small, pagemask, spans);
   }
@@ -219,6 +239,46 @@ export function assembleSpans(name, small, pagemask, cinfoList) {
   return { spans, stats };
 }
 
+function computeColumnMeans(mask, width, height) {
+  const maskData = mask.data;
+  const stride = mask.cols;
+
+  const colSums = new Int32Array(width).fill(0);
+  const colWeightedSums = new Int32Array(width).fill(0);
+
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const val = maskData[y * stride + x];
+      if (val > 0) {
+        colSums[x] += val;
+        colWeightedSums[x] += y * val;
+      }
+    }
+  }
+
+  const means = [];
+  for (let x = 0; x < width; x++) {
+    means.push(colWeightedSums[x] / colSums[x]);
+  }
+
+  return means;
+}
+
+function sampleContourPoints(cinfo, step) {
+  const { width, height } = cinfo.rect;
+  const means = computeColumnMeans(cinfo.mask, width, height);
+
+  const start = Math.floor(((means.length - 1) % step) / 2);
+  const { x: xmin, y: ymin } = cinfo.rect;
+
+  const points = [];
+  for (let x = start; x < means.length; x += step) {
+    points.push([x + xmin, means[x] + ymin]);
+  }
+
+  return points;
+}
+
 /**
  * Extracts evenly-spaced sample points along each span's center line.
  * @param {cv.Mat | Object} shape
@@ -227,54 +287,155 @@ export function assembleSpans(name, small, pagemask, cinfoList) {
  */
 export function sampleSpans(shape, spans) {
   const spanPoints = [];
-  const cv = getOpenCV();
+  const step = Config.SPAN_PX_PER_STEP;
 
   for (const span of spans) {
     const contourPoints = [];
     for (const cinfo of span) {
-      const { width, height } = cinfo.rect;
-      // mask is tight mask of size (height, width)
-
-      // mask.data is Uint8Array
-      const maskData = cinfo.mask.data;
-      const stride = cinfo.mask.cols;
-
-      // We need column sums and column weighted sums.
-      const colSums = new Int32Array(width).fill(0);
-      const colWeightedSums = new Int32Array(width).fill(0);
-
-      for (let y = 0; y < height; y++) {
-        for (let x = 0; x < width; x++) {
-          const val = maskData[y * stride + x];
-          if (val > 0) {
-            // usually 1 or 255
-            colSums[x] += val;
-            colWeightedSums[x] += y * val;
-          }
-        }
-      }
-
-      const means = [];
-      for (let x = 0; x < width; x++) {
-        means.push(colWeightedSums[x] / colSums[x]);
-      }
-
-      const step = Config.SPAN_PX_PER_STEP;
-      const start = Math.floor(((means.length - 1) % step) / 2);
-
-      const { x: xmin, y: ymin } = cinfo.rect;
-
-      for (let x = start; x < means.length; x += step) {
-        contourPoints.push([x + xmin, means[x] + ymin]);
-      }
+      const points = sampleContourPoints(cinfo, step);
+      contourPoints.push(...points);
     }
 
-    // Normalize points
     if (contourPoints.length > 0) {
       spanPoints.push(pix2norm(shape, contourPoints));
     }
   }
   return spanPoints;
+}
+
+function getPrincipalAxis(points) {
+  if (points.length < 2) return [1, 0];
+
+  let sumX = 0,
+    sumY = 0;
+  for (const p of points) {
+    sumX += p[0];
+    sumY += p[1];
+  }
+  const meanX = sumX / points.length;
+  const meanY = sumY / points.length;
+
+  let cXX = 0,
+    cXY = 0,
+    cYY = 0;
+  for (const p of points) {
+    const dx = p[0] - meanX;
+    const dy = p[1] - meanY;
+    cXX += dx * dx;
+    cXY += dx * dy;
+    cYY += dy * dy;
+  }
+
+  const T = cXX + cYY;
+  const D = cXX * cYY - cXY * cXY;
+  const L1 = T / 2 + Math.sqrt(Math.max(0, (T * T) / 4 - D));
+
+  let vx, vy;
+  if (Math.abs(cXY) > 1e-9) {
+    const diff = cXX - L1;
+    const theta = Math.atan2(-diff, cXY);
+    vx = Math.cos(theta);
+    vy = Math.sin(theta);
+  } else if (cXX >= cYY) {
+    vx = 1;
+    vy = 0;
+  } else {
+    vx = 0;
+    vy = 1;
+  }
+
+  if (vx < 0) {
+    vx = -vx;
+    vy = -vy;
+  }
+
+  return [vx, vy];
+}
+
+function computeGlobalPageAxes(spanPoints) {
+  let allEvecX = 0;
+  let allEvecY = 0;
+  let allWeights = 0;
+
+  const spanAxes = [];
+  const spanWeights = [];
+  
+  for (const points of spanPoints) {
+    if (points.length < 2) continue;
+
+    const [vx, vy] = getPrincipalAxis(points);
+    spanAxes.push([vx, vy]);
+    const pFirst = points[0];
+    const pLast = points[points.length - 1];
+
+    const weight = Math.sqrt(
+      Math.pow(pLast[0] - pFirst[0], 2) + Math.pow(pLast[1] - pFirst[1], 2)
+    );
+    spanWeights.push(weight);
+
+    allEvecX += vx * weight;
+    allEvecY += vy * weight;
+    allWeights += weight;
+  }
+
+  if (allWeights === 0) {
+    allEvecX = 1;
+    allEvecY = 0;
+    allWeights = 1;
+  }
+
+  const avgVx = allEvecX / allWeights;
+  const avgVy = allEvecY / allWeights;
+
+  let x_dir = [avgVx, avgVy];
+  if (x_dir[0] < 0) x_dir = [-x_dir[0], -x_dir[1]];
+  const y_dir = [-x_dir[1], x_dir[0]];
+
+  return { x_dir, y_dir, spanAxes, spanWeights, allEvecX, allEvecY, allWeights };
+}
+
+function computePageCorners(pageCoordsNorm, x_dir, y_dir) {
+  const px_coords = pageCoordsNorm.map(
+    (p) => p[0] * x_dir[0] + p[1] * x_dir[1]
+  );
+  const py_coords = pageCoordsNorm.map(
+    (p) => p[0] * y_dir[0] + p[1] * y_dir[1]
+  );
+
+  const px0 = Math.min(...px_coords);
+  const px1 = Math.max(...px_coords);
+  const py0 = Math.min(...py_coords);
+  const py1 = Math.max(...py_coords);
+
+  function getCorner(cx, cy) {
+    return [cx * x_dir[0] + cy * y_dir[0], cx * x_dir[1] + cy * y_dir[1]];
+  }
+
+  const corners = [
+    getCorner(px0, py0),
+    getCorner(px1, py0),
+    getCorner(px1, py1),
+    getCorner(px0, py1),
+  ];
+
+  return { corners, px0, py0 };
+}
+
+function computeSpanCoordinates(spanPoints, x_dir, y_dir, px0, py0) {
+  const xcoords = [];
+  const ycoords = [];
+
+  for (const points of spanPoints) {
+    const px = points.map((p) => p[0] * x_dir[0] + p[1] * x_dir[1]);
+    const py = points.map((p) => p[0] * y_dir[0] + p[1] * y_dir[1]);
+
+    xcoords.push(px.map((v) => v - px0));
+
+    const meanY = py.reduce((a, b) => a + b, 0) / py.length;
+    ycoords.push(meanY - py0);
+  }
+
+  return { xcoords, ycoords };
 }
 
 /**
@@ -293,161 +454,23 @@ export function keypointsFromSamples(
   page_outline,
   spanPoints
 ) {
-  // Helper for PCA on a set of points
-  function getPrincipalAxis(points) {
-    if (points.length < 2) return [1, 0];
+  const { x_dir, y_dir, spanAxes, spanWeights, allEvecX, allEvecY, allWeights } = 
+    computeGlobalPageAxes(spanPoints);
 
-    let sumX = 0,
-      sumY = 0;
-    for (const p of points) {
-      sumX += p[0];
-      sumY += p[1];
-    }
-    const meanX = sumX / points.length;
-    const meanY = sumY / points.length;
-
-    let cXX = 0,
-      cXY = 0,
-      cYY = 0;
-    for (const p of points) {
-      const dx = p[0] - meanX;
-      const dy = p[1] - meanY;
-      cXX += dx * dx;
-      cXY += dx * dy;
-      cYY += dy * dy;
-    }
-
-    const T = cXX + cYY;
-    const D = cXX * cYY - cXY * cXY;
-    const L1 = T / 2 + Math.sqrt(Math.max(0, (T * T) / 4 - D));
-
-    let vx, vy;
-    if (Math.abs(cXY) > 1e-9) {
-      const diff = cXX - L1;
-      const theta = Math.atan2(-diff, cXY);
-      vx = Math.cos(theta);
-      vy = Math.sin(theta);
-    } else if (cXX >= cYY) {
-      vx = 1;
-      vy = 0;
-    } else {
-      vx = 0;
-      vy = 1;
-    }
-
-    if (vx < 0) {
-      vx = -vx;
-      vy = -vy;
-    }
-
-    return [vx, vy];
-  }
-
-  // Weighted average of local PCAs
-  let allEvecX = 0;
-  let allEvecY = 0;
-  let allWeights = 0;
-
-  const spanAxes = [];
-  const spanWeights = [];
-  for (const points of spanPoints) {
-    if (points.length < 2) continue;
-
-    const [vx, vy] = getPrincipalAxis(points);
-    spanAxes.push([vx, vy]);
-    const pFirst = points[0];
-    const pLast = points[points.length - 1];
-
-    // Weight by span length
-    const weight = Math.sqrt(
-      Math.pow(pLast[0] - pFirst[0], 2) + Math.pow(pLast[1] - pFirst[1], 2)
-    );
-    spanWeights.push(weight);
-
-    allEvecX += vx * weight;
-    allEvecY += vy * weight;
-    allWeights += weight;
-  }
-
-  // Handle case with no valid spans
-  if (allWeights === 0) {
-    allEvecX = 1;
-    allEvecY = 0;
-    allWeights = 1;
-  }
-
-  const avgVx = allEvecX / allWeights;
-  const avgVy = allEvecY / allWeights;
-
-  let x_dir = [avgVx, avgVy];
-
-  if (x_dir[0] < 0) x_dir = [-x_dir[0], -x_dir[1]];
-  const y_dir = [-x_dir[1], x_dir[0]];
-
-  // Page corners from page_outline (pixels) -> normalized -> projected to axes
   const pageCoordsNorm = pix2norm(pagemask, page_outline);
-
-  // Project pageCoordsNorm onto x_dir and y_dir
-  const px_coords = pageCoordsNorm.map(
-    (p) => p[0] * x_dir[0] + p[1] * x_dir[1]
-  );
-  const py_coords = pageCoordsNorm.map(
-    (p) => p[0] * y_dir[0] + p[1] * y_dir[1]
-  );
-
-  const px0 = Math.min(...px_coords);
-  const px1 = Math.max(...px_coords);
-  const py0 = Math.min(...py_coords);
-  const py1 = Math.max(...py_coords);
-
-  function getCorner(cx, cy) {
-    return [cx * x_dir[0] + cy * y_dir[0], cx * x_dir[1] + cy * y_dir[1]];
-  }
-
-  const corners = [
-    getCorner(px0, py0), // TL
-    getCorner(px1, py0), // TR
-    getCorner(px1, py1), // BR
-    getCorner(px0, py1), // BL
-  ];
-
-  const xcoords = [];
-  const ycoords = [];
-
-  for (const points of spanPoints) {
-    const px = points.map((p) => p[0] * x_dir[0] + p[1] * x_dir[1]);
-    const py = points.map((p) => p[0] * y_dir[0] + p[1] * y_dir[1]);
-
-    // xcoords relative to px0
-    xcoords.push(px.map((v) => v - px0));
-
-    // ycoords mean relative to py0
-    const meanY = py.reduce((a, b) => a + b, 0) / py.length;
-    ycoords.push(meanY - py0);
-  }
+  const { corners, px0, py0 } = computePageCorners(pageCoordsNorm, x_dir, y_dir);
+  const { xcoords, ycoords } = computeSpanCoordinates(spanPoints, x_dir, y_dir, px0, py0);
 
   if (Config.DEBUG_LEVEL >= 2) {
     visualizeSpanPoints(name, small, spanPoints, corners);
   }
-  DebugMetrics.add("keypoint_axes", {
-    x_dir,
-    y_dir,
-  });
-  DebugMetrics.add("keypoint_axis_sums", {
-    allEvecX,
-    allEvecY,
-    allWeights,
-  });
+  
+  DebugMetrics.add("keypoint_axes", { x_dir, y_dir });
+  DebugMetrics.add("keypoint_axis_sums", { allEvecX, allEvecY, allWeights });
   DebugMetrics.add("keypoint_corners", corners);
   DebugMetrics.add("keypoint_ycoords", ycoords);
-  DebugMetrics.add(
-    "keypoint_xcoords_lengths",
-    xcoords.map((pts) => pts.length)
-  );
-  DebugMetrics.add(
-    "keypoint_xcoords_sample",
-    xcoords.slice(0, 5).map((pts) => pts.slice(0, 5))
-  );
+  DebugMetrics.add("keypoint_xcoords_lengths", xcoords.map((pts) => pts.length));
+  DebugMetrics.add("keypoint_xcoords_sample", xcoords.slice(0, 5).map((pts) => pts.slice(0, 5)));
   DebugMetrics.add("keypoint_span_axes_count", spanAxes.length);
   DebugMetrics.add("keypoint_span_axes", spanAxes);
   DebugMetrics.add("keypoint_span_weights", spanWeights);

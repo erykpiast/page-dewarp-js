@@ -29,16 +29,12 @@ export function solveDLT(objectPoints, imagePoints, cameraMatrix) {
   }
 }
 
-function solvePlanar(cv, objectPoints, imagePoints, K) {
-  // Use Homography decomposition
-  // H maps world (x,y) to image (u,v)
-  // s * [u, v, 1]^T = K * [r1 r2 t] * [X, Y, 1]^T
-
+function computeHomography(objectPoints, imagePoints, cv) {
   const srcData = [];
   const dstData = [];
   for (let i = 0; i < objectPoints.length; i++) {
-    srcData.push(objectPoints[i][0], objectPoints[i][1]); // X, Y (Z is ignored/0)
-    dstData.push(imagePoints[i][0], imagePoints[i][1]); // u, v
+    srcData.push(objectPoints[i][0], objectPoints[i][1]);
+    dstData.push(imagePoints[i][0], imagePoints[i][1]);
   }
 
   const srcMat = cv.matFromArray(objectPoints.length, 1, cv.CV_32FC2, srcData);
@@ -46,21 +42,17 @@ function solvePlanar(cv, objectPoints, imagePoints, K) {
 
   const H = cv.findHomography(srcMat, dstMat);
 
-  // H is 3x3
-  // H = K * [r1, r2, t]
-  // K_inv * H = [r1, r2, t]
+  srcMat.delete();
+  dstMat.delete();
 
-  // Invert K (3x3)
-  // K is flat array of 9
+  return H;
+}
+
+function decomposeHomographyToPose(H, K, cv) {
   const fx = K[0],
     cx = K[2],
     fy = K[4],
     cy = K[5];
-
-  // K_inv explicitly
-  // [1/fx, 0, -cx/fx]
-  // [0, 1/fy, -cy/fy]
-  // [0, 0, 1]
 
   const h00 = H.doubleAt(0, 0),
     h01 = H.doubleAt(0, 1),
@@ -71,11 +63,6 @@ function solvePlanar(cv, objectPoints, imagePoints, K) {
   const h20 = H.doubleAt(2, 0),
     h21 = H.doubleAt(2, 1),
     h22 = H.doubleAt(2, 2);
-
-  // Col 1: r1 = K_inv * h_col1
-  // r1x = (h00 - cx*h20)/fx
-  // r1y = (h10 - cy*h20)/fy
-  // r1z = h20
 
   let r1x = (h00 - cx * h20) / fx;
   let r1y = (h10 - cy * h20) / fy;
@@ -89,7 +76,6 @@ function solvePlanar(cv, objectPoints, imagePoints, K) {
   let ty = (h12 - cy * h22) / fy;
   let tz = h22;
 
-  // Normalize r1, r2
   const n1 = Math.sqrt(r1x * r1x + r1y * r1y + r1z * r1z);
   r1x /= n1;
   r1y /= n1;
@@ -100,19 +86,15 @@ function solvePlanar(cv, objectPoints, imagePoints, K) {
   r2y /= n2;
   r2z /= n2;
 
-  // Scale t (average scale)
   const scale = (n1 + n2) / 2;
-
   tx /= scale;
   ty /= scale;
   tz /= scale;
 
-  // r3 = r1 x r2
   let r3x = r1y * r2z - r1z * r2y;
   let r3y = r1z * r2x - r1x * r2z;
   let r3z = r1x * r2y - r1y * r2x;
 
-  // Use JS SVD since cv.SVDecomp seems unavailable/broken
   const A_js = [
     [r1x, r2x, r3x],
     [r1y, r2y, r3y],
@@ -121,7 +103,6 @@ function solvePlanar(cv, objectPoints, imagePoints, K) {
 
   const { u: U_js, vt: Vt_js } = svd3x3(A_js);
 
-  // R_ortho = U * Vt
   const R_ortho_js = [
     [0, 0, 0],
     [0, 0, 0],
@@ -135,7 +116,6 @@ function solvePlanar(cv, objectPoints, imagePoints, K) {
     }
   }
 
-  // Convert to rvec
   const R_ortho_flat = R_ortho_js.flat();
   const R_ortho = cv.matFromArray(3, 3, cv.CV_64F, R_ortho_flat);
 
@@ -149,13 +129,16 @@ function solvePlanar(cv, objectPoints, imagePoints, K) {
   ];
   const tvec = [tx, ty, tz];
 
-  // Cleanup
-  srcMat.delete();
-  dstMat.delete();
-  H.delete();
   R_ortho.delete();
   rvecMat.delete();
 
+  return { rvec, tvec };
+}
+
+function solvePlanar(cv, objectPoints, imagePoints, K) {
+  const H = computeHomography(objectPoints, imagePoints, cv);
+  const { rvec, tvec } = decomposeHomographyToPose(H, K, cv);
+  H.delete();
   return { rvec, tvec };
 }
 

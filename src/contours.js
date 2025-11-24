@@ -182,14 +182,7 @@ export function getLastContourStats() {
   return lastContourStats;
 }
 
-/**
- * Finds and filters text contours from a binary mask.
- * @param {string} name
- * @param {cv.Mat} small
- * @param {cv.Mat} mask
- * @returns {Array<ContourInfo>}
- */
-export function getContours(name, small, mask) {
+function findRawContours(mask) {
   const cv = getOpenCV();
   const contoursVec = new cv.MatVector();
   const hierarchy = new cv.Mat();
@@ -201,6 +194,74 @@ export function getContours(name, small, mask) {
     cv.RETR_EXTERNAL,
     cv.CHAIN_APPROX_NONE
   );
+
+  hierarchy.delete();
+  return contoursVec;
+}
+
+function filterContourByGeometry(contour, rect, stats) {
+  const { width, height } = rect;
+
+  if (width < Config.TEXT_MIN_WIDTH) {
+    stats.rejectionBreakdown.width++;
+    if (stats.sampleRejectedRects.length < 20) {
+      stats.sampleRejectedRects.push({ reason: "width", rect });
+    }
+    return { valid: false, reason: "width" };
+  }
+
+  if (height < Config.TEXT_MIN_HEIGHT) {
+    stats.rejectionBreakdown.height++;
+    if (stats.sampleRejectedRects.length < 20) {
+      stats.sampleRejectedRects.push({ reason: "height", rect });
+    }
+    return { valid: false, reason: "height" };
+  }
+
+  if (width < Config.TEXT_MIN_ASPECT * height) {
+    stats.rejectionBreakdown.aspect++;
+    if (stats.sampleRejectedRects.length < 20) {
+      stats.sampleRejectedRects.push({ reason: "aspect", rect });
+    }
+    return { valid: false, reason: "aspect" };
+  }
+
+  return { valid: true };
+}
+
+function filterContourByThickness(tightMask, rect, stats) {
+  const cv = getOpenCV();
+  const colSums = new cv.Mat();
+  cv.reduce(tightMask, colSums, 0, cv.REDUCE_SUM, cv.CV_32S);
+
+  let maxThickness = 0;
+  const colSumsData = colSums.data32S;
+  for (let j = 0; j < colSumsData.length; j++) {
+    if (colSumsData[j] > maxThickness) maxThickness = colSumsData[j];
+  }
+  colSums.delete();
+
+  if (maxThickness > Config.TEXT_MAX_THICKNESS) {
+    stats.rejectionBreakdown.thickness++;
+    if (stats.sampleRejectedRects.length < 20) {
+      stats.sampleRejectedRects.push({ reason: "thickness", rect });
+    }
+    return { valid: false, reason: "thickness" };
+  }
+
+  return { valid: true };
+}
+
+/**
+ * Finds and filters text contours from a binary mask.
+ * @param {string} name
+ * @param {cv.Mat} small
+ * @param {cv.Mat} mask
+ * @returns {Array<ContourInfo>}
+ */
+export function getContours(name, small, mask) {
+  const cv = getOpenCV();
+  const contoursVec = findRawContours(mask);
 
   const contoursOut = [];
   const stats = {
@@ -218,54 +279,19 @@ export function getContours(name, small, mask) {
 
   for (let i = 0; i < contoursVec.size(); i++) {
     const contour = contoursVec.get(i);
-    const rect = cv.boundingRect(contour); // {x, y, width, height}
-
+    const rect = cv.boundingRect(contour);
     const { width, height, x: xmin, y: ymin } = rect;
 
-    if (width < Config.TEXT_MIN_WIDTH) {
-      stats.rejectionBreakdown.width++;
-      if (stats.sampleRejectedRects.length < 20) {
-        stats.sampleRejectedRects.push({ reason: "width", rect });
-      }
-      contour.delete();
-      continue;
-    }
-    if (height < Config.TEXT_MIN_HEIGHT) {
-      stats.rejectionBreakdown.height++;
-      if (stats.sampleRejectedRects.length < 20) {
-        stats.sampleRejectedRects.push({ reason: "height", rect });
-      }
-      contour.delete();
-      continue;
-    }
-    if (width < Config.TEXT_MIN_ASPECT * height) {
-      stats.rejectionBreakdown.aspect++;
-      if (stats.sampleRejectedRects.length < 20) {
-        stats.sampleRejectedRects.push({ reason: "aspect", rect });
-      }
+    const geometryResult = filterContourByGeometry(contour, rect, stats);
+    if (!geometryResult.valid) {
       contour.delete();
       continue;
     }
 
     const tightMask = makeTightMask(contour, xmin, ymin, width, height);
 
-    // check max thickness (max value of column sums)
-    // reduce to row vector by summing columns
-    const colSums = new cv.Mat();
-    cv.reduce(tightMask, colSums, 0, cv.REDUCE_SUM, cv.CV_32S);
-    let maxThickness = 0;
-    // iterate colSums
-    const colSumsData = colSums.data32S;
-    for (let j = 0; j < colSumsData.length; j++) {
-      if (colSumsData[j] > maxThickness) maxThickness = colSumsData[j];
-    }
-    colSums.delete();
-
-    if (maxThickness > Config.TEXT_MAX_THICKNESS) {
-      stats.rejectionBreakdown.thickness++;
-      if (stats.sampleRejectedRects.length < 20) {
-        stats.sampleRejectedRects.push({ reason: "thickness", rect });
-      }
+    const thicknessResult = filterContourByThickness(tightMask, rect, stats);
+    if (!thicknessResult.valid) {
       tightMask.delete();
       contour.delete();
       continue;
@@ -289,9 +315,7 @@ export function getContours(name, small, mask) {
     contour.delete();
   }
 
-  hierarchy.delete();
   contoursVec.delete();
-
   lastContourStats = stats;
 
   if (Config.DEBUG_LEVEL >= 2) {
