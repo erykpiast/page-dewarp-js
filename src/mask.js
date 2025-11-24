@@ -4,6 +4,12 @@ import { getOpenCV } from "./cv-loader.js";
 import { DebugMetrics } from "./debug-metrics.js";
 import { debugShow } from "./debug.js";
 
+/**
+ * Creates a rectangular structuring element for morphological operations.
+ * @param {number} width
+ * @param {number} height
+ * @returns {cv.Mat}
+ */
 export function box(width, height) {
   const cv = getOpenCV();
   // struct element of ones
@@ -70,6 +76,9 @@ function collectMaskStats(mask, includeAllRects = false) {
   return stats;
 }
 
+/**
+ * Generates a binary text mask using adaptive thresholding and morphology.
+ */
 export class Mask {
   constructor(name, small, pagemask, text = true) {
     this.name = name;

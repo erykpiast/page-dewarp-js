@@ -1,6 +1,10 @@
 import { Config } from "./config.js";
 import { getOpenCV } from "./cv-loader.js";
 
+/**
+ * Returns the 3x3 camera intrinsic matrix.
+ * @returns {cv.Mat}
+ */
 export function getK() {
   const cv = getOpenCV();
   const f_val = Config.FOCAL_LENGTH;
@@ -8,6 +12,13 @@ export function getK() {
   return cv.matFromArray(3, 3, cv.CV_64F, data);
 }
 
+/**
+ * Projects 2D page coordinates to 2D image coordinates using the cubic surface
+ * model and camera pose.
+ * @param {Array<[number, number]>} xyCoords
+ * @param {Array<number>} pvec
+ * @returns {Array<[number, number]>}
+ */
 export function projectXY(xyCoords, pvec) {
   const cv = getOpenCV();
 

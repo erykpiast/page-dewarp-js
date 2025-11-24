@@ -1,6 +1,13 @@
 import { Config } from "./config.js";
 import { solvePnP } from "./solvepnp/index.js";
 
+/**
+ * Computes initial camera pose and builds the parameter vector for optimization.
+ * @param {Array<[number, number]>} corners
+ * @param {Array<number>} ycoords
+ * @param {Array<Array<number>>} xcoords
+ * @returns {{ pageDims: [number, number], spanCounts: Array<number>, params: Array<number> }}
+ */
 export function getDefaultParams(corners, ycoords, xcoords) {
   function dist(p1, p2) {
     return Math.sqrt(Math.pow(p1[0] - p2[0], 2) + Math.pow(p1[1] - p2[1], 2));

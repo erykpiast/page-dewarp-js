@@ -169,6 +169,13 @@ function lineSearchAlongDirection(x, direction, objective, tol, scratch) {
   return { alpha, fx };
 }
 
+/**
+ * Implements Powell's method (derivative-free optimization using sequential 1D line searches).
+ * @param {Function} objective
+ * @param {Array<number>} initialParams
+ * @param {Object} options
+ * @returns {{ x: Array<number>, fx: number }}
+ */
 export function minimize(objective, initialParams, options = {}) {
   const maxIter = options.maxIter ?? Config.OPTIM_MAX_ITER;
   const tol = options.tol ?? Config.OPTIM_TOL;
@@ -256,6 +263,15 @@ export function minimize(objective, initialParams, options = {}) {
   return { x: Array.from(x), fx };
 }
 
+/**
+ * Refines the page model to minimize reprojection error.
+ * @param {string} name
+ * @param {cv.Mat} small
+ * @param {Array<[number, number]>} dstpoints
+ * @param {Array<number>} spanCounts
+ * @param {Array<number>} params
+ * @returns {Promise<Array<number>>}
+ */
 export async function optimiseParams(
   name,
   small,

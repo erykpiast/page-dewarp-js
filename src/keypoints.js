@@ -1,5 +1,10 @@
 import { projectXY } from "./projection.js";
 
+/**
+ * Builds an index mapping each keypoint to its position in the parameter vector.
+ * @param {Array<number>} spanCounts
+ * @returns {Array<[number, number]>}
+ */
 export function makeKeypointIndex(spanCounts) {
   const nSpans = spanCounts.length;
   const nPts = spanCounts.reduce((a, b) => a + b, 0);
@@ -26,6 +31,12 @@ export function makeKeypointIndex(spanCounts) {
   return keypointIndex;
 }
 
+/**
+ * Projects all keypoints using the current parameters.
+ * @param {Array<number>} pvec
+ * @param {Array<[number, number]>} keypointIndex
+ * @returns {Array<[number, number]>}
+ */
 export function projectKeypoints(pvec, keypointIndex) {
   // pvec is flat array
   // xy_coords = pvec[keypoint_index]

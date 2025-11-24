@@ -108,6 +108,14 @@ function generateCandidateEdge(cinfoA, cinfoB, statsTracker) {
   return { score, cinfoA, cinfoB };
 }
 
+/**
+ * Groups contours into horizontal text lines using proximity/alignment scoring.
+ * @param {string} name
+ * @param {cv.Mat} small
+ * @param {cv.Mat} pagemask
+ * @param {Array<ContourInfo>} cinfoList
+ * @returns {{ spans: Array<Array<ContourInfo>>, stats: Object }}
+ */
 export function assembleSpans(name, small, pagemask, cinfoList) {
   // Sort by y, then x/width/height for determinism
   cinfoList.sort(
@@ -211,6 +219,12 @@ export function assembleSpans(name, small, pagemask, cinfoList) {
   return { spans, stats };
 }
 
+/**
+ * Extracts evenly-spaced sample points along each span's center line.
+ * @param {cv.Mat | Object} shape
+ * @param {Array<Array<ContourInfo>>} spans
+ * @returns {Array<Array<[number, number]>>}
+ */
 export function sampleSpans(shape, spans) {
   const spanPoints = [];
   const cv = getOpenCV();
@@ -263,6 +277,15 @@ export function sampleSpans(shape, spans) {
   return spanPoints;
 }
 
+/**
+ * Computes page corners and normalized coordinates for optimization.
+ * @param {string} name
+ * @param {cv.Mat} small
+ * @param {cv.Mat} pagemask
+ * @param {Array<[number, number]>} page_outline
+ * @param {Array<Array<[number, number]>>} spanPoints
+ * @returns {{ corners: Array<[number, number]>, ycoords: Array<number>, xcoords: Array<Array<number>> }}
+ */
 export function keypointsFromSamples(
   name,
   small,

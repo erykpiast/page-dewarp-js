@@ -1,3 +1,9 @@
+/**
+ * @module config
+ * @description Global configuration for the page-dewarp pipeline.
+ * Contains camera parameters, detection thresholds, and output settings.
+ */
+
 export const Config = {
   // [camera_opts]
   FOCAL_LENGTH: 1.2,

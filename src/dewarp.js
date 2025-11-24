@@ -3,6 +3,10 @@ import { getOpenCV } from "./cv-loader.js";
 import { projectXY } from "./projection.js";
 import { norm2pix, roundNearestMultiple, saveMat } from "./utils.js";
 
+/**
+ * Generates the final dewarped output by mapping target pixels back through the
+ * optimized 3D model.
+ */
 export class RemappedImage {
   constructor(name, img, small, pageDims, params) {
     this.name = name;

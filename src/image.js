@@ -12,6 +12,9 @@ import { assembleSpans, keypointsFromSamples, sampleSpans } from "./spans.js";
 import { imgsize, loadImageMat } from "./utils.js";
 import { drawProjectedGrid } from "./visualization.js";
 
+/**
+ * Orchestrates the full dewarping pipeline from loading to output.
+ */
 export class WarpedImage {
   constructor(imgfile) {
     this.imgfile = imgfile;

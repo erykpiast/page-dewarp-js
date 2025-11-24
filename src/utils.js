@@ -8,6 +8,11 @@ export function imgsize(img) {
   return `${cols}x${rows}`;
 }
 
+/**
+ * Loads an image file into an OpenCV Mat.
+ * @param {string} imgPath
+ * @returns {Promise<cv.Mat>}
+ */
 export async function loadImageMat(imgPath) {
   const cv = getOpenCV();
   const image = await loadImage(imgPath);
@@ -18,6 +23,12 @@ export async function loadImageMat(imgPath) {
   return cv.matFromImageData(imageData);
 }
 
+/**
+ * Saves an OpenCV Mat to a PNG file.
+ * @param {cv.Mat} mat
+ * @param {string} path
+ * @returns {Promise<void>}
+ */
 export async function saveMat(mat, path) {
   const cv = getOpenCV();
   const img = new cv.Mat();
@@ -56,6 +67,12 @@ export function roundNearestMultiple(i, factor) {
   return rem ? i + factor - rem : i;
 }
 
+/**
+ * Converts pixel coordinates to normalized coordinates centered at the image center.
+ * @param {cv.Mat | Object | Array} shape
+ * @param {Array<[number, number]>} pts
+ * @returns {Array<[number, number]>}
+ */
 export function pix2norm(shape, pts) {
   // shape: [height, width] or {rows, cols}
   // pts: array of [x, y] or flat array? Python handles (..., 1, 2)
@@ -69,6 +86,13 @@ export function pix2norm(shape, pts) {
   return pts.map((p) => [(p[0] - offsetX) * scl, (p[1] - offsetY) * scl]);
 }
 
+/**
+ * Converts normalized coordinates back to pixel coordinates.
+ * @param {cv.Mat | Object | Array} shape
+ * @param {Array<[number, number]>} pts
+ * @param {boolean} asInteger
+ * @returns {Array<[number, number]>}
+ */
 export function norm2pix(shape, pts, asInteger = true) {
   const height = shape.rows || shape[0];
   const width = shape.cols || shape[1];

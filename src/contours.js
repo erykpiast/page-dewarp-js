@@ -2,6 +2,9 @@ import { Config } from "./config.js";
 import { getOpenCV } from "./cv-loader.js";
 import { cCOLOURS, debugShow } from "./debug.js";
 
+/**
+ * Represents a single detected text blob with geometric properties.
+ */
 export class ContourInfo {
   constructor(contour, moments, rect, mask) {
     this.contour = contour; // cv.Mat (vector of points)
@@ -78,6 +81,11 @@ function intervalMeasureOverlap(int_a, int_b) {
   return Math.min(int_a[1], int_b[1]) - Math.max(int_a[0], int_b[0]);
 }
 
+/**
+ * Calculates center of mass and principal axis orientation using image moments.
+ * @param {cv.Mat} contour
+ * @returns {{ center: [number, number], tangent: [number, number] } | null}
+ */
 export function blobMeanAndTangent(contour) {
   const cv = getOpenCV();
   const moments = cv.moments(contour);
@@ -133,6 +141,15 @@ export function blobMeanAndTangent(contour) {
   };
 }
 
+/**
+ * Creates a cropped binary mask for a contour.
+ * @param {cv.Mat} contour
+ * @param {number} xmin
+ * @param {number} ymin
+ * @param {number} width
+ * @param {number} height
+ * @returns {cv.Mat}
+ */
 export function makeTightMask(contour, xmin, ymin, width, height) {
   const cv = getOpenCV();
   const mask = new cv.Mat.zeros(height, width, cv.CV_8UC1);
@@ -165,6 +182,13 @@ export function getLastContourStats() {
   return lastContourStats;
 }
 
+/**
+ * Finds and filters text contours from a binary mask.
+ * @param {string} name
+ * @param {cv.Mat} small
+ * @param {cv.Mat} mask
+ * @returns {Array<ContourInfo>}
+ */
 export function getContours(name, small, mask) {
   const cv = getOpenCV();
   const contoursVec = new cv.MatVector();
