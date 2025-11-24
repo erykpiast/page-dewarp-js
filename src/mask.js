@@ -150,8 +150,6 @@ export class Mask {
       recordStage("morph2", mask, "dilate(8x2)");
     }
 
-    // Combine with pagemask
-    // np.minimum(mask, pagemask) -> bitwise_and (since they are binary 0/255)
     const finalMask = new cv.Mat();
     cv.bitwise_and(mask, this.pagemask, finalMask);
     recordStage("final", finalMask, "bitwise_and_pagemask");

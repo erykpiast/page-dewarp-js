@@ -1,13 +1,11 @@
 import opencv from "opencv-wasm";
 
-// Helper to nuke .then
 function stripThen(obj) {
   if (obj && typeof obj.then === "function") {
-    console.log("Stripping .then from opencv object to prevent await hang");
     try {
       obj.then = undefined;
     } catch (e) {
-      console.error("Failed to set .then to undefined", e);
+      // Silently handle error
     }
   }
   return obj;

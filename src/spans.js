@@ -218,15 +218,6 @@ export function sampleSpans(shape, spans) {
   for (const span of spans) {
     const contourPoints = [];
     for (const cinfo of span) {
-      // yvals = np.arange(mask.shape[0])
-      // totals = (yvals * mask).sum(axis=0)
-      // means = totals / mask.sum(axis=0)
-      // This logic calculates the vertical center of mass of the mask column by column?
-      // Python code iterates per contour.
-
-      // In JS, accessing pixels is slow if we do it manually.
-      // cinfo.mask is a Mat.
-      // We can iterate columns.
       const { width, height } = cinfo.rect;
       // mask is tight mask of size (height, width)
 

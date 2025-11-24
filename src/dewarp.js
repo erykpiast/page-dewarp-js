@@ -11,18 +11,10 @@ export class RemappedImage {
     this.pageDims = pageDims; // [width, height]
     this.params = params;
     this.threshfile = null;
-
-    // this.process(); // Do not call async process in constructor!
   }
 
   async process() {
     const cv = getOpenCV();
-
-    // Calculate output height/width
-    // pageDims are normalized?
-    // In Python: height = 0.5 * page_dims[1] * config.OUTPUT_ZOOM * img.shape[0]
-    // page_dims come from get_page_dims which returns normalized dims?
-    // Yes, get_default_params returns norms.
 
     const [pageWidthNorm, pageHeightNorm] = this.pageDims;
 

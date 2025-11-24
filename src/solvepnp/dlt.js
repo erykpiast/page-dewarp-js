@@ -160,93 +160,9 @@ function solvePlanar(cv, objectPoints, imagePoints, K) {
 }
 
 function solveGenericDLT(cv, objectPoints, imagePoints, K) {
-  // Simple DLT implementation for generic 3D points
-  // x_n = K_inv * x_pix
-  // lambda * x_n = [R|t] * X
-
-  const fx = K[0],
-    cx = K[2],
-    fy = K[4],
-    cy = K[5];
-
-  // 1. Normalize image points to normalized camera coords
-  const normalizedImgPts = imagePoints.map((p) => {
-    return [(p[0] - cx) / fx, (p[1] - cy) / fy];
-  });
-
-  const numPts = objectPoints.length;
-  // A is 2*numPts x 12
-  const A_data = new Float64Array(2 * numPts * 12);
-
-  for (let i = 0; i < numPts; i++) {
-    const X = objectPoints[i][0],
-      Y = objectPoints[i][1],
-      Z = objectPoints[i][2];
-    const u = normalizedImgPts[i][0];
-    const v = normalizedImgPts[i][1];
-
-    // Row 1: P3.X * u - P1.X = 0  => -X P1 ... + u X P3 ...
-    // Vars: P1(4), P2(4), P3(4)
-
-    // -X, -Y, -Z, -1,  0,  0,  0,  0,  uX, uY, uZ, u
-    const r1 = i * 2;
-    A_data[r1 * 12 + 0] = -X;
-    A_data[r1 * 12 + 1] = -Y;
-    A_data[r1 * 12 + 2] = -Z;
-    A_data[r1 * 12 + 3] = -1;
-
-    A_data[r1 * 12 + 8] = u * X;
-    A_data[r1 * 12 + 9] = u * Y;
-    A_data[r1 * 12 + 10] = u * Z;
-    A_data[r1 * 12 + 11] = u;
-
-    // Row 2: P3.X * v - P2.X = 0 => 0, 0, 0, 0, -X, -Y, -Z, -1, vX, vY, vZ, v
-    const r2 = r1 + 1;
-    A_data[r2 * 12 + 4] = -X;
-    A_data[r2 * 12 + 5] = -Y;
-    A_data[r2 * 12 + 6] = -Z;
-    A_data[r2 * 12 + 7] = -1;
-
-    A_data[r2 * 12 + 8] = v * X;
-    A_data[r2 * 12 + 9] = v * Y;
-    A_data[r2 * 12 + 10] = v * Z;
-    A_data[r2 * 12 + 11] = v;
-  }
-
-  const MatA = cv.matFromArray(2 * numPts, 12, cv.CV_64F, A_data);
-  const S = new cv.Mat();
-  const U = new cv.Mat();
-  const Vt = new cv.Mat();
-
-  // SVD of A. Solution is last row of Vt (corresponding to smallest singular value)
-  // We assume cv.SVDecomp works for generic matrix if it failed for 3x3?
-  // No, assume it fails generally.
-  // But generic DLT requires 12x12 SVD or larger.
-  // Implementing full SVD in JS is complex.
-  // Let's rely on cv.SVDecomp being present but maybe misused before?
-  // Error was "cv.SVDecomp is not a function".
-  // It seems opencv-wasm build might exclude it or name it differently.
-  // But we saw SVD keys in 'cv': [ 'DECOMP_SVD', 'SVD_FULL_UV', 'SVD_MODIFY_A', 'SVD_NO_UV' ]
-  // These are flags.
-  // The function might be cv.SVD? Or cv.SVDecomp?
-  // In opencv.js it is cv.SVDecomp.
-  // If it's missing, we might need another SVD library or use `ml-matrix`.
-  // Let's check `ml-matrix` since we have `ml-levenberg-marquardt` which depends on it.
-
-  // Fallback: Throw error if not planar for now, or use minimal implementation?
-  // Let's assume we can skip Generic DLT for this task (Book Dewarping is mostly planar initialization).
-  // But user asked for "Generic".
-  // Let's use `ml-matrix` for SVD!
-
-  // Since we cannot import ml-matrix easily here without verifying install (it is dep of ml-lm),
-  // let's assume Planar is the main path for now and fix the SyntaxError.
-
-  // But wait, `solveGenericDLT` was not called in the error trace. `solvePlanar` was.
-  // So let's fix `solvePlanar` logic fully.
-
-  // Just fix the syntax error first (write the file cleanly).
-
-  return { rvec: [0, 0, 0], tvec: [0, 0, 0] }; // Placeholder for generic if not reached
+  throw new Error(
+    "Non-planar DLT not implemented - input points must have Z=0"
+  );
 }
 
 function svd3x3(A) {

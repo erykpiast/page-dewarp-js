@@ -36,10 +36,8 @@ export async function saveMat(mat, path) {
     data: Buffer.from(img.data),
   });
 
-  // console.log(`[DEBUG] writing to ${path}`);
   const buffer = await jimpImg.getBuffer("image/png");
   await fs.writeFile(path, buffer);
-  // console.log(`[DEBUG] wrote to ${path}`);
 
   img.delete();
 }

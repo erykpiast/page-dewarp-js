@@ -137,12 +137,6 @@ export function makeTightMask(contour, xmin, ymin, width, height) {
   const cv = getOpenCV();
   const mask = new cv.Mat.zeros(height, width, cv.CV_8UC1);
 
-  // Shift contour
-  const shiftedContour = new cv.Mat();
-  // We can't easily shift points in place without iteration in JS OpenCV bindings (no broadcasting)
-  // Or we use a transformation matrix? No, just iterating is easier for now or drawContours with offset?
-  // drawContours supports 'offset' parameter!
-
   const contoursVec = new cv.MatVector();
   contoursVec.push_back(contour);
 
@@ -162,8 +156,6 @@ export function makeTightMask(contour, xmin, ymin, width, height) {
   );
 
   contoursVec.delete();
-  // shiftedContour not strictly needed if we use offset
-  shiftedContour.delete();
 
   return mask;
 }
@@ -265,16 +257,6 @@ export function getContours(name, small, mask) {
       contour.delete();
       continue;
     }
-
-    // NOTE: We are keeping 'contour' Mat alive inside ContourInfo.
-    // We need to verify if 'contoursVec.get(i)' returns a copy or reference.
-    // It returns a new Mat header sharing data? Or a copy?
-    // Usually in opencv.js it's a new Mat. We must manually delete it later when destroying ContourInfo.
-    // For now, we let the GC handle ContourInfo, but the Mat inside needs explicit deletion?
-    // opencv-wasm requires explicit delete().
-    // So we should probably clone the contour to own it, or ensure we manage lifecycle.
-    // contoursVec.get(i) gives us a Mat. If we push to contoursOut, we keep it.
-    // If we continue, we must delete it.
 
     contoursOut.push(
       new ContourInfo(contour.clone(), moments, rect, tightMask)
