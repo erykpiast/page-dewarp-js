@@ -1,5 +1,6 @@
 import path from "path";
 import { Config } from "./config.js";
+import { getLastContourStats } from "./contours.js";
 import { getOpenCV } from "./cv-loader.js";
 import { DebugMetrics } from "./debug-metrics.js";
 import { RemappedImage } from "./dewarp.js";
@@ -8,7 +9,7 @@ import { minimize, optimiseParams } from "./optimise.js";
 import { projectXY } from "./projection.js";
 import { getDefaultParams } from "./solve.js";
 import { assembleSpans, keypointsFromSamples, sampleSpans } from "./spans.js";
-import { imgsize, jimpToMat, loadJimpImage } from "./utils.js";
+import { imgsize, loadImageMat } from "./utils.js";
 import { drawProjectedGrid } from "./visualization.js";
 
 export class WarpedImage {
@@ -50,14 +51,32 @@ export class WarpedImage {
     console.log(`  Found ${this.contour_list.length} initial text contours`);
 
     DebugMetrics.add("contours_count", this.contour_list.length);
+    const contourStats = getLastContourStats();
+    if (contourStats) {
+      DebugMetrics.add("contours_stats", contourStats);
+    }
     DebugMetrics.add(
       "contours_sample",
       this.contour_list.slice(0, 5).map((c) => ({
-        x: c.x,
-        y: c.y,
-        width: c.width,
-        height: c.height,
+        x: c.rect.x,
+        y: c.rect.y,
+        width: c.rect.width,
+        height: c.rect.height,
       }))
+    );
+    DebugMetrics.add(
+      "contours_rects",
+      this.contour_list
+        .map((c) => ({
+          x: c.rect.x,
+          y: c.rect.y,
+          width: c.rect.width,
+          height: c.rect.height,
+        }))
+        .sort(
+          (a, b) =>
+            a.y - b.y || a.x - b.x || a.width - b.width || a.height - b.height
+        )
     );
 
     console.log("  Assembling spans...");
@@ -67,15 +86,19 @@ export class WarpedImage {
     DebugMetrics.add(
       "spans_sample",
       spans.slice(0, 5).map((span) => ({
-        x0: span.xmin,
-        x1: span.xmax,
-        y_start: span.ypred && span.ypred.length > 0 ? span.ypred[0] : null,
-        y_end:
-          span.ypred && span.ypred.length > 0
-            ? span.ypred[span.ypred.length - 1]
+        x0: span.length > 0 ? span[0].rect.x : null,
+        x1:
+          span.length > 0
+            ? span[span.length - 1].rect.x + span[span.length - 1].rect.width
             : null,
+        y_start: span.length > 0 ? span[0].center[1] : null,
+        y_end: span.length > 0 ? span[span.length - 1].center[1] : null,
+        contour_count: span.length,
       }))
     );
+    if (this.spanStats) {
+      DebugMetrics.add("span_stats", this.spanStats);
+    }
 
     if (spans.length < 1) {
       console.log(`skipping ${this.stem} because only ${spans.length} spans`);
@@ -86,6 +109,14 @@ export class WarpedImage {
     const spanPoints = sampleSpans(this.small, spans);
     const nPts = spanPoints.reduce((a, b) => a + b.length, 0);
     console.log(`  got ${spans.length} spans with ${nPts} points.`);
+    DebugMetrics.add(
+      "span_point_counts",
+      spanPoints.map((pts) => pts.length)
+    );
+    DebugMetrics.add(
+      "span_points_sample",
+      spanPoints.slice(0, 5).map((pts) => pts.slice(0, 5))
+    );
 
     console.log("  Getting keypoints...");
     const { corners, ycoords, xcoords } = keypointsFromSamples(
@@ -150,13 +181,12 @@ export class WarpedImage {
 
   async load() {
     const cv = getOpenCV();
-    const jimpImg = await loadJimpImage(this.imgfile);
-    this.cv2_img = jimpToMat(jimpImg);
+    this.cv2_img = await loadImageMat(this.imgfile);
 
-    const rgb = new cv.Mat();
-    cv.cvtColor(this.cv2_img, rgb, cv.COLOR_RGBA2RGB);
+    const bgr = new cv.Mat();
+    cv.cvtColor(this.cv2_img, bgr, cv.COLOR_RGBA2BGR);
     this.cv2_img.delete();
-    this.cv2_img = rgb;
+    this.cv2_img = bgr;
 
     this.small = this.resizeToScreen();
   }
@@ -170,21 +200,18 @@ export class WarpedImage {
 
     if (scl > 1.0) {
       const inv_scl = 1.0 / scl;
-      const newWidth = Math.round(width * inv_scl);
-      const newHeight = Math.round(height * inv_scl);
       const dst = new cv.Mat();
       cv.resize(
         this.cv2_img,
         dst,
-        new cv.Size(newWidth, newHeight),
-        0,
-        0,
+        new cv.Size(0, 0),
+        inv_scl,
+        inv_scl,
         cv.INTER_AREA
       );
       return dst;
-    } else {
-      return this.cv2_img.clone();
     }
+    return this.cv2_img.clone();
   }
 
   calculatePageExtents() {
@@ -219,28 +246,37 @@ export class WarpedImage {
   }
 
   iterativelyAssembleSpans() {
-    let spans = assembleSpans(
+    let result = assembleSpans(
       this.stem,
       this.small,
       this.pagemask,
       this.contour_list
     );
-    if (spans.length < 3) {
-      console.log(`  detecting lines because only ${spans.length} text spans`);
+    if (result.spans.length < 3) {
+      console.log(
+        `  detecting lines because only ${result.spans.length} text spans`
+      );
       this.contour_list = this.contourInfo(false); // lines
-      spans = this.attemptReassembleSpans(spans);
+      result = this.attemptReassembleSpans(result);
     }
-    return spans;
+    this.spanStats = {
+      ...result.stats,
+      spanCount: result.spans.length,
+      totalContours: this.contour_list.length,
+    };
+    return result.spans;
   }
 
-  attemptReassembleSpans(prevSpans) {
-    const newSpans = assembleSpans(
+  attemptReassembleSpans(prevResult) {
+    const newResult = assembleSpans(
       this.stem,
       this.small,
       this.pagemask,
       this.contour_list
     );
-    return newSpans.length > prevSpans.length ? newSpans : prevSpans;
+    return newResult.spans.length > prevResult.spans.length
+      ? newResult
+      : prevResult;
   }
 
   async getPageDims(corners, roughDims, params) {

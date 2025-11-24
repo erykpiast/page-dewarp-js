@@ -79,6 +79,16 @@ async function main() {
       type: "number",
       default: Config.SPAN_PX_PER_STEP,
     })
+    .option("optim-max-iter", {
+      alias: "oi",
+      type: "number",
+      default: Config.OPTIM_MAX_ITER,
+    })
+    .option("optim-tol", {
+      alias: "ot",
+      type: "number",
+      default: Config.OPTIM_TOL,
+    })
     .option("max-edge-overlap", {
       alias: "eo",
       type: "number",
@@ -152,6 +162,8 @@ async function main() {
     OUTPUT_DPI: argv.outputDpi,
     NO_BINARY: argv.noBinary,
     REMAP_DECIMATE: argv.shrink,
+    OPTIM_MAX_ITER: argv.optimMaxIter,
+    OPTIM_TOL: argv.optimTol,
   };
 
   updateConfig(configUpdates);

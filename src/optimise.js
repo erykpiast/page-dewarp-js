@@ -49,94 +49,211 @@ function bracketMinimum(f, x0, s = 0.1) {
   return { a, b, c };
 }
 
-function goldenSectionSearch(f, a, b, c, tol) {
-  const phi = 1.61803398875;
-  const resphi = 2 - phi;
+function brentSearch(f, a, b, c, tol) {
+  const CGOLD = 0.381966;
+  const ZEPS = 1e-10;
+  const ITMAX = 100;
 
-  let x0 = a;
-  let x3 = c;
-  let x1, x2;
+  let x = b;
+  let w = b;
+  let v = b;
+  let fx = f(x);
+  let fw = fx;
+  let fv = fx;
+  let e = 0.0;
+  let d = 0.0;
 
-  if (Math.abs(c - b) > Math.abs(b - a)) {
-    x1 = b;
-    x2 = b + resphi * (c - b);
-  } else {
-    x2 = b;
-    x1 = b - resphi * (b - a);
-  }
+  for (let iter = 0; iter < ITMAX; iter++) {
+    const xm = 0.5 * (a + c);
+    const tol1 = tol * Math.abs(x) + ZEPS;
+    const tol2 = 2.0 * tol1;
 
-  let f1 = f(x1);
-  let f2 = f(x2);
-
-  let iter = 0;
-  while (
-    Math.abs(x3 - x0) > tol * (Math.abs(x1) + Math.abs(x2)) &&
-    iter < 100
-  ) {
-    if (f2 < f1) {
-      x0 = x1;
-      x1 = x2;
-      x2 = resphi * x1 + (1 - resphi) * x3;
-      f1 = f2;
-      f2 = f(x2);
-    } else {
-      x3 = x2;
-      x2 = x1;
-      x1 = resphi * x2 + (1 - resphi) * x0;
-      f2 = f1;
-      f1 = f(x1);
+    if (Math.abs(x - xm) <= tol2 - 0.5 * (c - a)) {
+      return x;
     }
-    iter++;
+
+    let u;
+    if (Math.abs(e) > tol1) {
+      const r = (x - w) * (fx - fv);
+      let q = (x - v) * (fx - fw);
+      let p = (x - v) * q - (x - w) * r;
+      q = 2.0 * (q - r);
+      if (q > 0.0) p = -p;
+      q = Math.abs(q);
+      const etemp = e;
+      e = d;
+
+      if (
+        Math.abs(p) >= Math.abs(0.5 * q * etemp) ||
+        p <= q * (a - x) ||
+        p >= q * (c - x)
+      ) {
+        e = x >= xm ? a - x : c - x;
+        d = CGOLD * e;
+      } else {
+        d = p / q;
+        u = x + d;
+        if (u - a < tol2 || c - u < tol2) {
+          d = xm - x >= 0 ? tol1 : -tol1;
+        }
+      }
+    } else {
+      e = x >= xm ? a - x : c - x;
+      d = CGOLD * e;
+    }
+
+    u = Math.abs(d) >= tol1 ? x + d : x + (d >= 0 ? tol1 : -tol1);
+    const fu = f(u);
+
+    if (fu <= fx) {
+      if (u >= x) {
+        a = x;
+      } else {
+        c = x;
+      }
+      v = w;
+      w = x;
+      x = u;
+      fv = fw;
+      fw = fx;
+      fx = fu;
+    } else {
+      if (u < x) {
+        a = u;
+      } else {
+        c = u;
+      }
+      if (fu <= fw || w === x) {
+        v = w;
+        w = u;
+        fv = fw;
+        fw = fu;
+      } else if (fu <= fv || v === x || v === w) {
+        v = u;
+        fv = fu;
+      }
+    }
   }
 
-  return f1 < f2 ? x1 : x2;
+  return x;
 }
 
 function optimize1D(f, x0, tol) {
   const { a, b, c } = bracketMinimum(f, x0);
-  return goldenSectionSearch(f, a, b, c, tol);
+  return brentSearch(f, a, b, c, tol);
 }
 
 // --- Main Minimize Function ---
 
-export function minimize(objective, initialParams, options = {}) {
-  const maxIter = options.maxIter || 20;
-  const tol = options.tol || 1e-4;
-  const log = options.log || false;
+function lineSearchAlongDirection(x, direction, objective, tol, scratch) {
+  let maxComponent = 0;
+  for (let i = 0; i < direction.length; i++) {
+    maxComponent = Math.max(maxComponent, Math.abs(direction[i]));
+  }
+  if (maxComponent < 1e-12) {
+    return { alpha: 0, fx: objective(x) };
+  }
 
-  let x = Float64Array.from(initialParams);
-  const N = x.length;
-  let currentFx = objective(x);
+  const phi = (alpha) => {
+    for (let i = 0; i < x.length; i++) {
+      scratch[i] = x[i] + alpha * direction[i];
+    }
+    return objective(scratch);
+  };
+
+  const alpha = optimize1D(phi, 0, tol);
+  for (let i = 0; i < x.length; i++) {
+    x[i] = x[i] + alpha * direction[i];
+  }
+  const fx = objective(x);
+  return { alpha, fx };
+}
+
+export function minimize(objective, initialParams, options = {}) {
+  const maxIter = options.maxIter ?? Config.OPTIM_MAX_ITER;
+  const tol = options.tol ?? Config.OPTIM_TOL;
+  const log = options.log ?? false;
+
+  const x = Float64Array.from(initialParams);
+  const n = x.length;
+  let fx = objective(x);
+
+  const directions = [];
+  for (let i = 0; i < n; i++) {
+    const dir = new Float64Array(n);
+    dir[i] = 1;
+    directions.push(dir);
+  }
+
+  const scratch = new Float64Array(n);
+  const xOld = new Float64Array(n);
+  const pt = new Float64Array(n);
+  const delta = new Float64Array(n);
 
   for (let iter = 1; iter <= maxIter; iter++) {
-    const startFx = currentFx;
+    xOld.set(x);
+    const fxOld = fx;
+    let biggestDecrease = 0;
+    let biggestIdx = -1;
 
-    for (let i = 0; i < N; i++) {
-      // Optimize parameter i
-      const f1d = (val) => {
-        const oldVal = x[i];
-        x[i] = val;
-        const res = objective(x);
-        x[i] = oldVal; // Restore
-        return res;
-      };
-
-      const bestVal = optimize1D(f1d, x[i], tol);
-      x[i] = bestVal;
-
-      currentFx = objective(x);
+    for (let i = 0; i < n; i++) {
+      const dir = directions[i];
+      const fBefore = fx;
+      const { alpha, fx: fxAfter } = lineSearchAlongDirection(
+        x,
+        dir,
+        objective,
+        tol,
+        scratch
+      );
+      if (alpha !== 0) {
+        const decrease = fBefore - fxAfter;
+        if (decrease > biggestDecrease) {
+          biggestDecrease = decrease;
+          biggestIdx = i;
+        }
+        fx = fxAfter;
+      }
     }
 
-    if (log && iter % 1 === 0) {
-      console.log(`  iter ${iter}: loss ${currentFx.toFixed(4)}`);
+    let converged = Math.abs(fxOld - fx) < tol;
+
+    for (let i = 0; i < n; i++) {
+      delta[i] = x[i] - xOld[i];
+      pt[i] = x[i] + delta[i];
     }
 
-    if (Math.abs(startFx - currentFx) < tol) {
+    const fpt = objective(pt);
+    if (
+      fpt < fx &&
+      biggestIdx !== -1 &&
+      2 * (fxOld - 2 * fx + fpt) * Math.pow(fxOld - fx - biggestDecrease, 2) <
+        biggestDecrease * Math.pow(fxOld - fpt, 2)
+    ) {
+      const { alpha, fx: fxAfter } = lineSearchAlongDirection(
+        x,
+        delta,
+        objective,
+        tol,
+        scratch
+      );
+      if (alpha !== 0) {
+        fx = fxAfter;
+        directions[biggestIdx] = Float64Array.from(delta);
+        converged = false;
+      }
+    }
+
+    if (log) {
+      console.log(`  iter ${iter}: loss ${fx.toFixed(4)}`);
+    }
+
+    if (converged) {
       break;
     }
   }
 
-  return { x: Array.from(x), fx: currentFx };
+  return { x: Array.from(x), fx };
 }
 
 export async function optimiseParams(
@@ -177,14 +294,14 @@ export async function optimiseParams(
   }
 
   console.log(
-    `  optimizing ${params.length} parameters using Coordinate Descent...`
+    `  optimizing ${params.length} parameters using Powell's method...`
   );
 
   const start = Date.now();
   const solution = minimize(objective, params, {
     log: true,
-    maxIter: 20,
-    tol: 1e-4,
+    maxIter: Config.OPTIM_MAX_ITER,
+    tol: Config.OPTIM_TOL,
   });
   const end = Date.now();
 

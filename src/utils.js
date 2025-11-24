@@ -1,3 +1,4 @@
+import { createCanvas, loadImage } from "canvas";
 import fs from "fs/promises";
 import { Jimp } from "jimp";
 import { getOpenCV } from "./cv-loader.js";
@@ -7,20 +8,14 @@ export function imgsize(img) {
   return `${cols}x${rows}`;
 }
 
-export async function loadJimpImage(path) {
-  const image = await Jimp.read(path);
-  return image;
-}
-
-export function jimpToMat(jimpImg) {
+export async function loadImageMat(imgPath) {
   const cv = getOpenCV();
-  const { width, height, data } = jimpImg.bitmap;
-  const mat = cv.matFromImageData({
-    data: new Uint8ClampedArray(data.buffer),
-    width,
-    height,
-  });
-  return mat;
+  const image = await loadImage(imgPath);
+  const canvas = createCanvas(image.width, image.height);
+  const ctx = canvas.getContext("2d");
+  ctx.drawImage(image, 0, 0, image.width, image.height);
+  const imageData = ctx.getImageData(0, 0, image.width, image.height);
+  return cv.matFromImageData(imageData);
 }
 
 export async function saveMat(mat, path) {
@@ -87,12 +82,8 @@ export function norm2pix(shape, pts, asInteger = true) {
     let x = p[0] * scl + offsetX;
     let y = p[1] * scl + offsetY;
     if (asInteger) {
-      x = Math.round(x + 0.5); // Match python's round/cast behavior?
-      // Python: (rval + 0.5).astype(int)
-      // Python int() truncates? astype(int) truncates towards zero usually.
-      // But here we added 0.5. So it's rounding.
-      x = Math.floor(x + 0.5);
-      y = Math.floor(y + 0.5);
+      x = Math.trunc(x + 0.5);
+      y = Math.trunc(y + 0.5);
     }
     return [x, y];
   });

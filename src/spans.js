@@ -1,5 +1,6 @@
 import { Config } from "./config.js";
 import { getOpenCV } from "./cv-loader.js";
+import { DebugMetrics } from "./debug-metrics.js";
 import { cCOLOURS, debugShow } from "./debug.js";
 import { norm2pix, pix2norm } from "./utils.js";
 
@@ -10,7 +11,7 @@ function angleDist(angleB, angleA) {
   return Math.abs(diff);
 }
 
-function generateCandidateEdge(cinfoA, cinfoB) {
+function generateCandidateEdge(cinfoA, cinfoB, statsTracker) {
   if (cinfoA.point0[0] > cinfoB.point1[0]) {
     [cinfoA, cinfoB] = [cinfoB, cinfoA];
   }
@@ -38,28 +39,116 @@ function generateCandidateEdge(cinfoA, cinfoB) {
       Math.pow(cinfoB.point0[1] - cinfoA.point1[1], 2)
   );
 
+  const diag =
+    statsTracker && statsTracker.edgeDiagnostics
+      ? {
+          a: cinfoA.debugId ?? cinfoA.debugIndex,
+          b: cinfoB.debugId ?? cinfoB.debugIndex,
+          dist,
+          overlap: xOverlap,
+          angle: deltaAngle,
+        }
+      : null;
+
   if (
     dist > Config.EDGE_MAX_LENGTH ||
     xOverlap > Config.EDGE_MAX_OVERLAP ||
     deltaAngle > Config.EDGE_MAX_ANGLE
   ) {
+    if (statsTracker) {
+      const { rejectionBreakdown } = statsTracker;
+      if (dist > Config.EDGE_MAX_LENGTH) {
+        rejectionBreakdown.distance++;
+        if (diag) diag.reason = "distance";
+      } else if (xOverlap > Config.EDGE_MAX_OVERLAP) {
+        rejectionBreakdown.overlap++;
+        if (diag) diag.reason = "overlap";
+      } else if (deltaAngle > Config.EDGE_MAX_ANGLE) {
+        rejectionBreakdown.angle++;
+        if (diag) diag.reason = "angle";
+      }
+    }
+    if (diag) {
+      diag.accepted = false;
+      statsTracker.edgeDiagnostics.push(diag);
+    }
     return null;
   }
 
+  if (statsTracker) {
+    const { acceptedMetrics } = statsTracker;
+    acceptedMetrics.distance.sum += dist;
+    acceptedMetrics.distance.min = Math.min(acceptedMetrics.distance.min, dist);
+    acceptedMetrics.distance.max = Math.max(acceptedMetrics.distance.max, dist);
+    acceptedMetrics.distance.count++;
+
+    acceptedMetrics.overlap.sum += xOverlap;
+    acceptedMetrics.overlap.min = Math.min(
+      acceptedMetrics.overlap.min,
+      xOverlap
+    );
+    acceptedMetrics.overlap.max = Math.max(
+      acceptedMetrics.overlap.max,
+      xOverlap
+    );
+    acceptedMetrics.overlap.count++;
+
+    acceptedMetrics.angle.sum += deltaAngle;
+    acceptedMetrics.angle.min = Math.min(acceptedMetrics.angle.min, deltaAngle);
+    acceptedMetrics.angle.max = Math.max(acceptedMetrics.angle.max, deltaAngle);
+    acceptedMetrics.angle.count++;
+  }
+
   const score = dist + deltaAngle * Config.EDGE_ANGLE_COST;
+  if (diag) {
+    diag.accepted = true;
+    diag.score = score;
+    statsTracker.edgeDiagnostics.push(diag);
+  }
   return { score, cinfoA, cinfoB };
 }
 
 export function assembleSpans(name, small, pagemask, cinfoList) {
-  // Sort by y-coordinate (top to bottom)
-  cinfoList.sort((a, b) => a.rect.y - b.rect.y);
+  // Sort by y, then x/width/height for determinism
+  cinfoList.sort(
+    (a, b) =>
+      a.rect.y - b.rect.y ||
+      a.rect.x - b.rect.x ||
+      a.rect.width - b.rect.width ||
+      a.rect.height - b.rect.height
+  );
+  cinfoList.forEach((cinfo, idx) => {
+    cinfo.debugIndex = idx;
+    cinfo.debugId = `${cinfo.rect.x},${cinfo.rect.y},${cinfo.rect.width},${cinfo.rect.height}`;
+  });
 
+  const stats = {
+    candidatePairs: 0,
+    validEdges: 0,
+    rejectionBreakdown: {
+      distance: 0,
+      overlap: 0,
+      angle: 0,
+    },
+    linkedContours: 0,
+    spanSizes: [],
+    spanWidths: [],
+    acceptedMetrics: {
+      distance: { sum: 0, min: Infinity, max: -Infinity, count: 0 },
+      overlap: { sum: 0, min: Infinity, max: -Infinity, count: 0 },
+      angle: { sum: 0, min: Infinity, max: -Infinity, count: 0 },
+    },
+    edgeDiagnostics: [],
+  };
   const candidateEdges = [];
+
   for (let i = 0; i < cinfoList.length; i++) {
     for (let j = 0; j < i; j++) {
-      const edge = generateCandidateEdge(cinfoList[i], cinfoList[j]);
+      stats.candidatePairs++;
+      const edge = generateCandidateEdge(cinfoList[i], cinfoList[j], stats);
       if (edge) {
         candidateEdges.push(edge);
+        stats.validEdges++;
       }
     }
   }
@@ -72,6 +161,7 @@ export function assembleSpans(name, small, pagemask, cinfoList) {
       cinfoB.pred = cinfoA;
     }
   }
+  stats.linkedContours = cinfoList.filter((c) => c.succ || c.pred).length;
 
   const spans = [];
   const listCopy = [...cinfoList];
@@ -94,6 +184,8 @@ export function assembleSpans(name, small, pagemask, cinfoList) {
 
     if (width > Config.SPAN_MIN_WIDTH) {
       spans.push(curSpan);
+      stats.spanWidths.push(width);
+      stats.spanSizes.push(curSpan.length);
     }
   }
 
@@ -101,7 +193,22 @@ export function assembleSpans(name, small, pagemask, cinfoList) {
     visualizeSpans(name, small, pagemask, spans);
   }
 
-  return spans;
+  const finalizeMetric = (metric) =>
+    metric.count
+      ? {
+          average: metric.sum / metric.count,
+          min: metric.min,
+          max: metric.max,
+        }
+      : { average: null, min: null, max: null };
+
+  stats.acceptedMetrics = {
+    distance: finalizeMetric(stats.acceptedMetrics.distance),
+    overlap: finalizeMetric(stats.acceptedMetrics.overlap),
+    angle: finalizeMetric(stats.acceptedMetrics.angle),
+  };
+
+  return { spans, stats };
 }
 
 export function sampleSpans(shape, spans) {
@@ -144,11 +251,7 @@ export function sampleSpans(shape, spans) {
 
       const means = [];
       for (let x = 0; x < width; x++) {
-        if (colSums[x] > 0) {
-          means.push(colWeightedSums[x] / colSums[x]);
-        } else {
-          means.push(0); // Should handle gaps?
-        }
+        means.push(colWeightedSums[x] / colSums[x]);
       }
 
       const step = Config.SPAN_PX_PER_STEP;
@@ -157,12 +260,7 @@ export function sampleSpans(shape, spans) {
       const { x: xmin, y: ymin } = cinfo.rect;
 
       for (let x = start; x < means.length; x += step) {
-        // Filter out zero columns if needed? Python doesn't seem to filter explicitly
-        // but mask usually implies non-zero area.
-        // If colSums[x] is 0, mean is undefined/NaN. Python divides by sum.
-        if (colSums[x] > 0) {
-          contourPoints.push([x + xmin, means[x] + ymin]);
-        }
+        contourPoints.push([x + xmin, means[x] + ymin]);
       }
     }
 
@@ -181,8 +279,6 @@ export function keypointsFromSamples(
   page_outline,
   spanPoints
 ) {
-  const cv = getOpenCV();
-
   // Helper for PCA on a set of points
   function getPrincipalAxis(points) {
     if (points.length < 2) return [1, 0];
@@ -217,18 +313,14 @@ export function keypointsFromSamples(
       const theta = Math.atan2(-diff, cXY);
       vx = Math.cos(theta);
       vy = Math.sin(theta);
+    } else if (cXX >= cYY) {
+      vx = 1;
+      vy = 0;
     } else {
-      if (cXX >= cYY) {
-        vx = 1;
-        vy = 0;
-      } else {
-        vx = 0;
-        vy = 1;
-      }
+      vx = 0;
+      vy = 1;
     }
 
-    // Ensure vector points roughly left-to-right (positive x)
-    // effectively aligning with text direction
     if (vx < 0) {
       vx = -vx;
       vy = -vy;
@@ -242,10 +334,13 @@ export function keypointsFromSamples(
   let allEvecY = 0;
   let allWeights = 0;
 
+  const spanAxes = [];
+  const spanWeights = [];
   for (const points of spanPoints) {
     if (points.length < 2) continue;
 
     const [vx, vy] = getPrincipalAxis(points);
+    spanAxes.push([vx, vy]);
     const pFirst = points[0];
     const pLast = points[points.length - 1];
 
@@ -253,6 +348,7 @@ export function keypointsFromSamples(
     const weight = Math.sqrt(
       Math.pow(pLast[0] - pFirst[0], 2) + Math.pow(pLast[1] - pFirst[1], 2)
     );
+    spanWeights.push(weight);
 
     allEvecX += vx * weight;
     allEvecY += vy * weight;
@@ -269,9 +365,7 @@ export function keypointsFromSamples(
   const avgVx = allEvecX / allWeights;
   const avgVy = allEvecY / allWeights;
 
-  // Normalize
-  const norm = Math.sqrt(avgVx * avgVx + avgVy * avgVy);
-  let x_dir = [avgVx / norm, avgVy / norm];
+  let x_dir = [avgVx, avgVy];
 
   if (x_dir[0] < 0) x_dir = [-x_dir[0], -x_dir[1]];
   const y_dir = [-x_dir[1], x_dir[0]];
@@ -321,6 +415,28 @@ export function keypointsFromSamples(
   if (Config.DEBUG_LEVEL >= 2) {
     visualizeSpanPoints(name, small, spanPoints, corners);
   }
+  DebugMetrics.add("keypoint_axes", {
+    x_dir,
+    y_dir,
+  });
+  DebugMetrics.add("keypoint_axis_sums", {
+    allEvecX,
+    allEvecY,
+    allWeights,
+  });
+  DebugMetrics.add("keypoint_corners", corners);
+  DebugMetrics.add("keypoint_ycoords", ycoords);
+  DebugMetrics.add(
+    "keypoint_xcoords_lengths",
+    xcoords.map((pts) => pts.length)
+  );
+  DebugMetrics.add(
+    "keypoint_xcoords_sample",
+    xcoords.slice(0, 5).map((pts) => pts.slice(0, 5))
+  );
+  DebugMetrics.add("keypoint_span_axes_count", spanAxes.length);
+  DebugMetrics.add("keypoint_span_axes", spanAxes);
+  DebugMetrics.add("keypoint_span_weights", spanWeights);
 
   return { corners, ycoords, xcoords };
 }

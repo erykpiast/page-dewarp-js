@@ -168,6 +168,11 @@ export function makeTightMask(contour, xmin, ymin, width, height) {
   return mask;
 }
 
+let lastContourStats = null;
+export function getLastContourStats() {
+  return lastContourStats;
+}
+
 export function getContours(name, small, mask) {
   const cv = getOpenCV();
   const contoursVec = new cv.MatVector();
@@ -182,6 +187,18 @@ export function getContours(name, small, mask) {
   );
 
   const contoursOut = [];
+  const stats = {
+    totalContours: contoursVec.size(),
+    acceptedContours: 0,
+    rejectionBreakdown: {
+      width: 0,
+      height: 0,
+      aspect: 0,
+      thickness: 0,
+      zeroMoments: 0,
+    },
+    sampleRejectedRects: [],
+  };
 
   for (let i = 0; i < contoursVec.size(); i++) {
     const contour = contoursVec.get(i);
@@ -189,11 +206,27 @@ export function getContours(name, small, mask) {
 
     const { width, height, x: xmin, y: ymin } = rect;
 
-    if (
-      width < Config.TEXT_MIN_WIDTH ||
-      height < Config.TEXT_MIN_HEIGHT ||
-      width < Config.TEXT_MIN_ASPECT * height
-    ) {
+    if (width < Config.TEXT_MIN_WIDTH) {
+      stats.rejectionBreakdown.width++;
+      if (stats.sampleRejectedRects.length < 20) {
+        stats.sampleRejectedRects.push({ reason: "width", rect });
+      }
+      contour.delete();
+      continue;
+    }
+    if (height < Config.TEXT_MIN_HEIGHT) {
+      stats.rejectionBreakdown.height++;
+      if (stats.sampleRejectedRects.length < 20) {
+        stats.sampleRejectedRects.push({ reason: "height", rect });
+      }
+      contour.delete();
+      continue;
+    }
+    if (width < Config.TEXT_MIN_ASPECT * height) {
+      stats.rejectionBreakdown.aspect++;
+      if (stats.sampleRejectedRects.length < 20) {
+        stats.sampleRejectedRects.push({ reason: "aspect", rect });
+      }
       contour.delete();
       continue;
     }
@@ -213,6 +246,10 @@ export function getContours(name, small, mask) {
     colSums.delete();
 
     if (maxThickness > Config.TEXT_MAX_THICKNESS) {
+      stats.rejectionBreakdown.thickness++;
+      if (stats.sampleRejectedRects.length < 20) {
+        stats.sampleRejectedRects.push({ reason: "thickness", rect });
+      }
       tightMask.delete();
       contour.delete();
       continue;
@@ -220,6 +257,10 @@ export function getContours(name, small, mask) {
 
     const moments = blobMeanAndTangent(contour);
     if (!moments) {
+      stats.rejectionBreakdown.zeroMoments++;
+      if (stats.sampleRejectedRects.length < 20) {
+        stats.sampleRejectedRects.push({ reason: "moments", rect });
+      }
       tightMask.delete();
       contour.delete();
       continue;
@@ -238,11 +279,14 @@ export function getContours(name, small, mask) {
     contoursOut.push(
       new ContourInfo(contour.clone(), moments, rect, tightMask)
     );
+    stats.acceptedContours++;
     contour.delete();
   }
 
   hierarchy.delete();
   contoursVec.delete();
+
+  lastContourStats = stats;
 
   if (Config.DEBUG_LEVEL >= 2) {
     visualizeContours(name, small, contoursOut);

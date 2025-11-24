@@ -29,6 +29,10 @@ export const Config = {
   // [mask_opts]
   ADAPTIVE_WINSZ: 55,
 
+  // [optim_opts]
+  OPTIM_MAX_ITER: 60,
+  OPTIM_TOL: 1e-6,
+
   // [output_opts]
   OUTPUT_ZOOM: 1.0,
   OUTPUT_DPI: 300,
