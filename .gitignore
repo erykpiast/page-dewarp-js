@@ -12,3 +12,5 @@ dist/
 
 # Output files
 *_thresh.png
+
+debug/
