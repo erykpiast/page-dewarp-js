@@ -103,26 +103,30 @@ export function refinePose(
       const Yc = R[1][0] * X + R[1][1] * Y + R[1][2] * Z + ty;
       const Zc = R[2][0] * X + R[2][1] * Y + R[2][2] * Z + tz;
 
-      const x_p = Xc / Zc;
-      const y_p = Yc / Zc;
+      const xProjected = Xc / Zc;
+      const yProjected = Yc / Zc;
 
-      let x_d = x_p,
-        y_d = y_p;
+      let xDistorted = xProjected,
+        yDistorted = yProjected;
       if (hasDist) {
-        const r2 = x_p * x_p + y_p * y_p;
+        const r2 = xProjected * xProjected + yProjected * yProjected;
         const r4 = r2 * r2;
         const r6 = r4 * r2;
         const rad = 1 + k1 * r2 + k2 * r4 + k3 * r6;
-        const dx = 2 * p1 * x_p * y_p + p2 * (r2 + 2 * x_p * x_p);
-        const dy = p1 * (r2 + 2 * y_p * y_p) + 2 * p2 * x_p * y_p;
-        x_d = x_p * rad + dx;
-        y_d = y_p * rad + dy;
+        const dx =
+          2 * p1 * xProjected * yProjected +
+          p2 * (r2 + 2 * xProjected * xProjected);
+        const dy =
+          p1 * (r2 + 2 * yProjected * yProjected) +
+          2 * p2 * xProjected * yProjected;
+        xDistorted = xProjected * rad + dx;
+        yDistorted = yProjected * rad + dy;
       }
 
       if (!isV) {
-        return fx * x_d + cx;
+        return fx * xDistorted + cx;
       } else {
-        return fy * y_d + cy;
+        return fy * yDistorted + cy;
       }
     };
   };

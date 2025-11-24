@@ -57,7 +57,7 @@ function buildRemapMaps(widthSmall, heightSmall, pageDims, params, img) {
   const mapXSmall = new cv.Mat(heightSmall, widthSmall, cv.CV_32F);
   const mapYSmall = new cv.Mat(heightSmall, widthSmall, cv.CV_32F);
 
-  let badPoints = 0;
+  let invalidPointCount = 0;
   for (let i = 0; i < imagePoints.length; i++) {
     const row = Math.floor(i / widthSmall);
     const col = i % widthSmall;
@@ -67,7 +67,7 @@ function buildRemapMaps(widthSmall, heightSmall, pageDims, params, img) {
       let y = imagePoints[i][1];
 
       if (!Number.isFinite(x) || !Number.isFinite(y)) {
-        badPoints++;
+        invalidPointCount++;
         x = 0;
         y = 0;
       }
@@ -83,9 +83,9 @@ function buildRemapMaps(widthSmall, heightSmall, pageDims, params, img) {
     }
   }
 
-  if (badPoints > 0) {
+  if (invalidPointCount > 0) {
     console.warn(
-      `  WARNING: Found ${badPoints} NaN/Inf points in projection. Replaced with 0.`
+      `  WARNING: Found ${invalidPointCount} NaN/Inf points in projection. Replaced with 0.`
     );
   }
 
@@ -108,14 +108,7 @@ function applyRemapAndThreshold(img, mapX, mapY, width, height) {
   cv.cvtColor(img, imgGray, cv.COLOR_RGB2GRAY);
 
   const remapped = new cv.Mat();
-  cv.remap(
-    imgGray,
-    remapped,
-    mapX,
-    mapY,
-    cv.INTER_CUBIC,
-    cv.BORDER_REPLICATE
-  );
+  cv.remap(imgGray, remapped, mapX, mapY, cv.INTER_CUBIC, cv.BORDER_REPLICATE);
 
   imgGray.delete();
 
@@ -168,13 +161,7 @@ export class RemappedImage {
       this.img
     );
 
-    const result = applyRemapAndThreshold(
-      this.img,
-      mapX,
-      mapY,
-      width,
-      height
-    );
+    const result = applyRemapAndThreshold(this.img, mapX, mapY, width, height);
 
     this.threshfile = `${this.name}_thresh.png`;
     await saveMat(result, this.threshfile);

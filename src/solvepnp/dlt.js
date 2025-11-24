@@ -148,6 +148,12 @@ function solveGenericDLT(cv, objectPoints, imagePoints, K) {
   );
 }
 
+/**
+ * Computes SVD of a 3x3 matrix using Jacobi eigenvalue algorithm.
+ * Returns U, Σ (as w), and V^T such that A = U Σ V^T.
+ * @param {Array<Array<number>>} A - 3x3 matrix
+ * @returns {{ u: Array<Array<number>>, w: Array<number>, vt: Array<Array<number>> }}
+ */
 function svd3x3(A) {
   // A is 3x3 array
   // Returns {u, w, vt}

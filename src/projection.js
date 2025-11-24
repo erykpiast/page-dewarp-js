@@ -35,6 +35,7 @@ export function projectXY(xyCoords, pvec) {
   a = Math.max(-0.5, Math.min(0.5, a));
   b = Math.max(-0.5, Math.min(0.5, b));
 
+  // Polynomial coefficients for cubic surface: z = p0*x^3 + p1*x^2 + p2*x
   const p0 = a + b;
   const p1 = -2 * a - b;
   const p2 = a;

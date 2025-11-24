@@ -4,6 +4,12 @@ import { DebugMetrics } from "./debug-metrics.js";
 import { cCOLOURS, debugShow } from "./debug.js";
 import { norm2pix, pix2norm } from "./utils.js";
 
+/**
+ * Computes the absolute angular distance between two angles, normalized to [0, π].
+ * @param {number} angleB
+ * @param {number} angleA
+ * @returns {number}
+ */
 function angleDist(angleB, angleA) {
   let diff = angleB - angleA;
   while (diff > Math.PI) diff -= 2 * Math.PI;
@@ -212,9 +218,9 @@ export function assembleSpans(name, small, pagemask, cinfoList) {
 
   const candidateEdges = generateAllCandidateEdges(cinfoList, stats);
   linkContours(candidateEdges);
-  
+
   stats.linkedContours = cinfoList.filter((c) => c.succ || c.pred).length;
-  
+
   const spans = extractSpans(cinfoList, stats);
 
   if (Config.DEBUG_LEVEL >= 2) {
@@ -315,28 +321,28 @@ function getPrincipalAxis(points) {
   const meanX = sumX / points.length;
   const meanY = sumY / points.length;
 
-  let cXX = 0,
-    cXY = 0,
-    cYY = 0;
+  let covXX = 0,
+    covXY = 0,
+    covYY = 0;
   for (const p of points) {
     const dx = p[0] - meanX;
     const dy = p[1] - meanY;
-    cXX += dx * dx;
-    cXY += dx * dy;
-    cYY += dy * dy;
+    covXX += dx * dx;
+    covXY += dx * dy;
+    covYY += dy * dy;
   }
 
-  const T = cXX + cYY;
-  const D = cXX * cYY - cXY * cXY;
+  const T = covXX + covYY;
+  const D = covXX * covYY - covXY * covXY;
   const L1 = T / 2 + Math.sqrt(Math.max(0, (T * T) / 4 - D));
 
   let vx, vy;
-  if (Math.abs(cXY) > 1e-9) {
-    const diff = cXX - L1;
-    const theta = Math.atan2(-diff, cXY);
+  if (Math.abs(covXY) > 1e-9) {
+    const diff = covXX - L1;
+    const theta = Math.atan2(-diff, covXY);
     vx = Math.cos(theta);
     vy = Math.sin(theta);
-  } else if (cXX >= cYY) {
+  } else if (covXX >= covYY) {
     vx = 1;
     vy = 0;
   } else {
@@ -359,7 +365,7 @@ function computeGlobalPageAxes(spanPoints) {
 
   const spanAxes = [];
   const spanWeights = [];
-  
+
   for (const points of spanPoints) {
     if (points.length < 2) continue;
 
@@ -384,44 +390,52 @@ function computeGlobalPageAxes(spanPoints) {
     allWeights = 1;
   }
 
-  const avgVx = allEvecX / allWeights;
-  const avgVy = allEvecY / allWeights;
+  const averageAxisX = allEvecX / allWeights;
+  const averageAxisY = allEvecY / allWeights;
 
-  let x_dir = [avgVx, avgVy];
+  let x_dir = [averageAxisX, averageAxisY];
   if (x_dir[0] < 0) x_dir = [-x_dir[0], -x_dir[1]];
   const y_dir = [-x_dir[1], x_dir[0]];
 
-  return { x_dir, y_dir, spanAxes, spanWeights, allEvecX, allEvecY, allWeights };
+  return {
+    x_dir,
+    y_dir,
+    spanAxes,
+    spanWeights,
+    allEvecX,
+    allEvecY,
+    allWeights,
+  };
 }
 
 function computePageCorners(pageCoordsNorm, x_dir, y_dir) {
-  const px_coords = pageCoordsNorm.map(
+  const projectedXCoords = pageCoordsNorm.map(
     (p) => p[0] * x_dir[0] + p[1] * x_dir[1]
   );
-  const py_coords = pageCoordsNorm.map(
+  const projectedYCoords = pageCoordsNorm.map(
     (p) => p[0] * y_dir[0] + p[1] * y_dir[1]
   );
 
-  const px0 = Math.min(...px_coords);
-  const px1 = Math.max(...px_coords);
-  const py0 = Math.min(...py_coords);
-  const py1 = Math.max(...py_coords);
+  const pageXMin = Math.min(...projectedXCoords);
+  const pageXMax = Math.max(...projectedXCoords);
+  const pageYMin = Math.min(...projectedYCoords);
+  const pageYMax = Math.max(...projectedYCoords);
 
   function getCorner(cx, cy) {
     return [cx * x_dir[0] + cy * y_dir[0], cx * x_dir[1] + cy * y_dir[1]];
   }
 
   const corners = [
-    getCorner(px0, py0),
-    getCorner(px1, py0),
-    getCorner(px1, py1),
-    getCorner(px0, py1),
+    getCorner(pageXMin, pageYMin),
+    getCorner(pageXMax, pageYMin),
+    getCorner(pageXMax, pageYMax),
+    getCorner(pageXMin, pageYMax),
   ];
 
-  return { corners, px0, py0 };
+  return { corners, pageXMin, pageYMin };
 }
 
-function computeSpanCoordinates(spanPoints, x_dir, y_dir, px0, py0) {
+function computeSpanCoordinates(spanPoints, x_dir, y_dir, pageXMin, pageYMin) {
   const xcoords = [];
   const ycoords = [];
 
@@ -429,10 +443,10 @@ function computeSpanCoordinates(spanPoints, x_dir, y_dir, px0, py0) {
     const px = points.map((p) => p[0] * x_dir[0] + p[1] * x_dir[1]);
     const py = points.map((p) => p[0] * y_dir[0] + p[1] * y_dir[1]);
 
-    xcoords.push(px.map((v) => v - px0));
+    xcoords.push(px.map((v) => v - pageXMin));
 
     const meanY = py.reduce((a, b) => a + b, 0) / py.length;
-    ycoords.push(meanY - py0);
+    ycoords.push(meanY - pageYMin);
   }
 
   return { xcoords, ycoords };
@@ -454,23 +468,46 @@ export function keypointsFromSamples(
   page_outline,
   spanPoints
 ) {
-  const { x_dir, y_dir, spanAxes, spanWeights, allEvecX, allEvecY, allWeights } = 
-    computeGlobalPageAxes(spanPoints);
+  const {
+    x_dir,
+    y_dir,
+    spanAxes,
+    spanWeights,
+    allEvecX,
+    allEvecY,
+    allWeights,
+  } = computeGlobalPageAxes(spanPoints);
 
   const pageCoordsNorm = pix2norm(pagemask, page_outline);
-  const { corners, px0, py0 } = computePageCorners(pageCoordsNorm, x_dir, y_dir);
-  const { xcoords, ycoords } = computeSpanCoordinates(spanPoints, x_dir, y_dir, px0, py0);
+  const { corners, pageXMin, pageYMin } = computePageCorners(
+    pageCoordsNorm,
+    x_dir,
+    y_dir
+  );
+  const { xcoords, ycoords } = computeSpanCoordinates(
+    spanPoints,
+    x_dir,
+    y_dir,
+    pageXMin,
+    pageYMin
+  );
 
   if (Config.DEBUG_LEVEL >= 2) {
     visualizeSpanPoints(name, small, spanPoints, corners);
   }
-  
+
   DebugMetrics.add("keypoint_axes", { x_dir, y_dir });
   DebugMetrics.add("keypoint_axis_sums", { allEvecX, allEvecY, allWeights });
   DebugMetrics.add("keypoint_corners", corners);
   DebugMetrics.add("keypoint_ycoords", ycoords);
-  DebugMetrics.add("keypoint_xcoords_lengths", xcoords.map((pts) => pts.length));
-  DebugMetrics.add("keypoint_xcoords_sample", xcoords.slice(0, 5).map((pts) => pts.slice(0, 5)));
+  DebugMetrics.add(
+    "keypoint_xcoords_lengths",
+    xcoords.map((pts) => pts.length)
+  );
+  DebugMetrics.add(
+    "keypoint_xcoords_sample",
+    xcoords.slice(0, 5).map((pts) => pts.slice(0, 5))
+  );
   DebugMetrics.add("keypoint_span_axes_count", spanAxes.length);
   DebugMetrics.add("keypoint_span_axes", spanAxes);
   DebugMetrics.add("keypoint_span_weights", spanWeights);

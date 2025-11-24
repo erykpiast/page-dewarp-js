@@ -18,22 +18,22 @@ export class ContourInfo {
 
     // Project points
     const pts = this.getPoints();
-    const clx = pts.map((p) => this.projX(p));
-    const lxmin = Math.min(...clx);
-    const lxmax = Math.max(...clx);
+    const projectedXCoords = pts.map((p) => this.projX(p));
+    const localXMin = Math.min(...projectedXCoords);
+    const localXMax = Math.max(...projectedXCoords);
 
-    this.local_xrng = [lxmin, lxmax];
+    this.local_xrng = [localXMin, localXMax];
 
-    // point0 = center + tangent * lxmin
+    // point0 = center + tangent * localXMin
     this.point0 = [
-      this.center[0] + this.tangent[0] * lxmin,
-      this.center[1] + this.tangent[1] * lxmin,
+      this.center[0] + this.tangent[0] * localXMin,
+      this.center[1] + this.tangent[1] * localXMin,
     ];
 
-    // point1 = center + tangent * lxmax
+    // point1 = center + tangent * localXMax
     this.point1 = [
-      this.center[0] + this.tangent[0] * lxmax,
-      this.center[1] + this.tangent[1] * lxmax,
+      this.center[0] + this.tangent[0] * localXMax,
+      this.center[1] + this.tangent[1] * localXMax,
     ];
 
     this.pred = null;
@@ -116,28 +116,28 @@ export function blobMeanAndTangent(contour) {
   // if mu11 != 0, y = -(mu20 - L1)x / mu11
   // Or use ATAN2 for stability.
 
-  let tx, ty;
+  let tangentX, tangentY;
   if (Math.abs(mu11) > 1e-9) {
     const diff = mu20 - L1;
     // (diff)x + (mu11)y = 0  =>  y/x = -diff/mu11
     const theta = Math.atan2(-diff, mu11);
-    tx = Math.cos(theta);
-    ty = Math.sin(theta);
+    tangentX = Math.cos(theta);
+    tangentY = Math.sin(theta);
   } else {
     // Diagonal matrix. Eigenvectors are (1,0) and (0,1).
     // L1 = max(mu20, mu02).
     if (mu20 >= mu02) {
-      tx = 1;
-      ty = 0;
+      tangentX = 1;
+      tangentY = 0;
     } else {
-      tx = 0;
-      ty = 1;
+      tangentX = 0;
+      tangentY = 1;
     }
   }
 
   return {
     center: [mean_x, mean_y],
-    tangent: [tx, ty],
+    tangent: [tangentX, tangentY],
   };
 }
 

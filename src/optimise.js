@@ -179,7 +179,16 @@ function initializeDirections(n) {
   return directions;
 }
 
-function powellIteration(x, directions, objective, tol, scratch, xOld, pt, delta) {
+function powellIteration(
+  x,
+  directions,
+  objective,
+  tol,
+  scratch,
+  xOld,
+  pt,
+  delta
+) {
   const n = x.length;
   xOld.set(x);
   const fxOld = objective(x);
