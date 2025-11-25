@@ -10,7 +10,4 @@ dist/
 # VSCode
 .vscode/
 
-# Output files
-*_thresh.png
-
 debug/
