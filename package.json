@@ -1,7 +1,7 @@
 {
   "name": "page-dewarp-js",
   "version": "0.1.0",
-  "description": "Page dewarping tool (JS port)",
+  "description": "Page dewarping tool (JS port of lmmx/page-dewarp)",
   "type": "module",
   "scripts": {
     "test": "vitest run",
