@@ -1,9 +1,19 @@
-page-dewarp-js
-==============
+# page-dewarp-js
 
 A JavaScript implementation of the [`page-dewarp` library](https://github.com/lmmx/page-dewarp), using [`opencv-wasm`](https://www.npmjs.com/package/opencv-wasm) bindings.
 
 Automatically detects curved page boundaries, estimates 3D shape, and generates flattened output images.
+
+> [!IMPORTANT]
+> This repository is the result of an LLM Agent experiment. I did not write any of the code directly. Instead,
+> I provided detailed plans describing the general approach, and asked the agent to produce a JavaScript port
+> of the Python library, making use of benchmarking tools and architecture comparisons. After a few evenings
+> of iteration, the results are sufficiently good. While the pre-selected difference metric thresholds were
+> not met, the visual results are convincing.
+
+| Input                 | Python Output                  | JavaScript Output      |
+| --------------------- | ------------------------------ | ---------------------- |
+| ![Input](./input.jpg) | ![Python output](./python.png) | ![JS output](./js.png) |
 
 ## Installation
 
