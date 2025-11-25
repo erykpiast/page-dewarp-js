@@ -11,6 +11,25 @@ The library includes a comprehensive metrics collection system that captures int
 - Understanding where in the pipeline divergence occurs
 - Performance profiling and optimization
 
+## Directory Structure for Benchmarking
+
+For benchmarking and debugging purposes, the Python reference implementation should be located next to this repository:
+
+```
+Development/
+├── page-dewarp/          # Python reference implementation
+└── page-dewarp-js/       # JavaScript implementation (this repository)
+```
+
+This allows comparison scripts and tools to access both implementations easily. The Python implementation can be cloned from:
+
+```bash
+cd /path/to/Development
+git clone https://github.com/lmmx/page-dewarp.git
+```
+
+With both repositories in place, you can compare outputs and metrics between implementations using the same test images.
+
 ## Debug Levels
 
 The library supports multiple debug levels controlled by the `DEBUG_LEVEL` config parameter:
@@ -255,6 +274,39 @@ console.log('Final cost:', metrics.final_cost);
 // Save to custom location
 DebugMetrics.save('my-analysis/results.json');
 ```
+
+### Comparing Python and JavaScript Implementations
+
+The `compare-metrics.js` script provides automated comparison between Python and JavaScript metrics output:
+
+```bash
+# Generate metrics from both implementations
+cd ../page-dewarp
+python -m page_dewarp.cli benchmark/example_input/boston_cooking_a.jpg -d 2
+# Creates: debug/boston_cooking_a_metrics_python.json
+
+cd ../page-dewarp-js
+node src/cli.js benchmark/example_input/boston_cooking_a.jpg -d 2
+# Creates: debug/boston_cooking_a_metrics_js.json
+
+# Compare metrics
+node compare-metrics.js
+```
+
+The comparison script analyzes:
+
+- Image dimensions and page extents
+- Contour detection counts and bounding boxes
+- Mask pipeline statistics
+- Span assembly results
+- Keypoint generation and sampling
+- Initial parameter values
+- Optimization convergence
+- Page dimensions
+
+Output includes color-coded status indicators (🟢/🟡/🔴) highlighting areas of alignment or divergence.
+
+**Note:** The script expects the Python implementation to be at `../page-dewarp/` relative to this repository.
 
 ### Python Equivalent
 

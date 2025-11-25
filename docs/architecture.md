@@ -2,9 +2,59 @@
 
 The `page-dewarp` library is a pipeline for rectifying photos of curved document pages. It follows a "optimization-based" approach where a 3D geometric model of the page surface is fitted to the 2D image data.
 
+## Pipeline Diagram
+
+```
+┌──────────────────┐
+│  Load Image      │
+└────────┬─────────┘
+         │
+         v
+┌──────────────────┐
+│ Preprocessing    │ (Grayscale, Downsample, Masking)
+└────────┬─────────┘
+         │
+         v
+┌──────────────────┐
+│ Contour          │ (Find text blobs, compute geometry)
+│ Detection        │
+└────────┬─────────┘
+         │
+         v
+┌──────────────────┐
+│ Span Assembly    │ (Group contours into text lines)
+└────────┬─────────┘
+         │
+         v
+┌──────────────────┐
+│ Sample Keypoints │ (Extract grid points along spans)
+└────────┬─────────┘
+         │
+         v
+┌──────────────────┐
+│ Initial Pose     │ (solvePnP on page corners)
+│ Estimation       │
+└────────┬─────────┘
+         │
+         v
+┌──────────────────┐
+│ Optimization     │ (Powell's method: minimize reprojection error)
+└────────┬─────────┘
+         │
+         v
+┌──────────────────┐
+│ Remap & Dewarp   │ (Generate flattened output)
+└────────┬─────────┘
+         │
+         v
+┌──────────────────┐
+│ Save Output      │
+└──────────────────┘
+```
+
 ## High-Level Pipeline
 
-The processing flow is orchestrated by the `WarpedImage` class (in `src/image.js` / `image.py`).
+The processing flow is orchestrated by the `WarpedImage` class (in `src/image.js`).
 
 1.  **Image Loading & Preprocessing**:
 
@@ -45,7 +95,7 @@ The processing flow is orchestrated by the `WarpedImage` class (in `src/image.js
       - `rvec` (3), `tvec` (3): Camera/Page pose.
       - `alpha`, `beta`: Cubic polynomial coefficients describing page curvature.
       - `ycoords`, `xcoords`: Refined grid positions.
-    - Algorithm: Powell's method (Python) / Nelder-Mead (JS port).
+    - Algorithm: Powell's method (derivative-free optimization).
 
 8.  **Dewarping (Remapping)**:
 
@@ -55,3 +105,85 @@ The processing flow is orchestrated by the `WarpedImage` class (in `src/image.js
 
 9.  **Post-processing**:
     - Apply adaptive thresholding to the rectified image to obtain a clean, binarized output.
+
+## Source Files and Responsibilities
+
+### Core Pipeline
+
+- **`src/image.js`** (`WarpedImage` class)
+  - Main entry point orchestrating the full pipeline
+  - Handles image loading, processing coordination, and output generation
+  - Manages OpenCV Mat lifecycle
+
+- **`src/dewarp.js`** (`RemappedImage` class)
+  - Generates the final dewarped output
+  - Creates coordinate remap maps from optimized parameters
+  - Applies remapping and optional thresholding
+
+### Detection and Analysis
+
+- **`src/mask.js`** (`Mask` class)
+  - Generates binary text mask using adaptive thresholding
+  - Applies morphological operations to clean up the mask
+
+- **`src/contours.js`** (`ContourInfo` class, `getContours()`)
+  - Detects text contours from binary mask
+  - Filters contours by geometric criteria
+  - Computes center and orientation (tangent) using image moments
+
+- **`src/spans.js`**
+  - Groups contours into horizontal text lines (spans)
+  - Samples points along each span
+  - Computes normalized coordinates for keypoints
+
+### 3D Modeling and Optimization
+
+- **`src/projection.js`**
+  - Projects 2D page coordinates to 2D image coordinates
+  - Implements cubic surface model for page curvature
+  - Manages camera intrinsic matrix
+
+- **`src/solve.js`**
+  - Computes initial camera pose using solvePnP
+  - Builds initial parameter vector for optimization
+
+- **`src/solvepnp/`**
+  - **`index.js`**: Main solvePnP entry point
+  - **`dlt.js`**: Direct Linear Transform (DLT) for planar pose estimation
+  - **`optimizer.js`**: Levenberg-Marquardt refinement
+
+- **`src/keypoints.js`**
+  - Manages keypoint indexing
+  - Projects all keypoints using current parameters
+
+- **`src/optimise.js`**
+  - Implements Powell's method for derivative-free optimization
+  - Minimizes reprojection error between detected and projected keypoints
+
+### Utilities
+
+- **`src/config.js`**
+  - Global configuration parameters
+  - Thresholds for detection, filtering, and optimization
+
+- **`src/utils.js`**
+  - Coordinate transformation utilities (pixel ↔ normalized)
+  - Image loading and saving helpers
+
+- **`src/cv-loader.js`**
+  - OpenCV WASM loading and initialization
+
+- **`src/visualization.js`**
+  - Debug visualization utilities
+  - Drawing functions for contours, spans, keypoints, grids
+
+- **`src/debug.js`** and **`src/debug-metrics.js`**
+  - Debug output management
+  - Metrics collection for validation
+
+### Command-Line Interface
+
+- **`src/cli.js`**
+  - Parses command-line arguments
+  - Configures pipeline parameters
+  - Processes input images
