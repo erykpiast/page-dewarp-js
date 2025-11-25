@@ -8,15 +8,15 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "canvas": "^3.2.0",
-    "fmin": "^0.0.4",
-    "fs-extra": "11.2.0",
-    "jimp": "^1.6.0",
-    "ml-levenberg-marquardt": "^5.0.0",
-    "opencv-wasm": "^4.3.0-10",
-    "yargs": "^18.0.0"
+    "canvas": "3.2.0",
+    "fmin": "0.0.4",
+    "fs-extra": "11.3.2",
+    "jimp": "1.6.0",
+    "ml-levenberg-marquardt": "5.0.0",
+    "opencv-wasm": "4.3.0-10",
+    "yargs": "18.0.0"
   },
   "devDependencies": {
-    "vitest": "4.0.13"
+    "vitest": "4.0.14"
   }
 }
