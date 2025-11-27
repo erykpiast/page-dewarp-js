@@ -1,6 +1,6 @@
 {
   "name": "page-dewarp-js",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Page dewarping tool (JS port of lmmx/page-dewarp)",
   "type": "module",
   "main": "src/index.js",
