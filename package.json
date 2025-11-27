@@ -4,6 +4,10 @@
   "description": "Page dewarping tool (JS port of lmmx/page-dewarp)",
   "type": "module",
   "main": "src/index.js",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/erykpiast/page-dewarp-js.git"
+  },
   "files": [
     "src/**/*.js",
     "README.md",
