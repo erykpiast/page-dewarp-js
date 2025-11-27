@@ -18,7 +18,7 @@ Automatically detects curved page boundaries, estimates 3D shape, and generates 
 ## Installation
 
 ```bash
-npm install
+npm install page-dewarp-js
 ```
 
 ## Development Setup
@@ -53,10 +53,26 @@ Output will be saved as `path/to/image_thresh.png`.
 ### Programmatic API
 
 ```javascript
-import { loadOpenCV } from "./src/cv-loader.js";
-import { WarpedImage } from "./src/image.js";
+import { loadOpenCV, WarpedImage } from "page-dewarp-js";
 
 await loadOpenCV();
+
+const warpedImage = new WarpedImage("input.jpg");
+await warpedImage.process();
+warpedImage.destroy();
+```
+
+For advanced usage, you can also import the configuration object:
+
+```javascript
+import { loadOpenCV, WarpedImage, Config, updateConfig } from "page-dewarp-js";
+
+await loadOpenCV();
+
+updateConfig({
+  OUTPUT_ZOOM: 2.0,
+  OUTPUT_DPI: 600,
+});
 
 const warpedImage = new WarpedImage("input.jpg");
 await warpedImage.process();
