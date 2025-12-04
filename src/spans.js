@@ -3,6 +3,7 @@ import { getOpenCV } from "./cv-loader.js";
 import { DebugMetrics } from "./debug-metrics.js";
 import { cCOLOURS, debugShow } from "./debug.js";
 import { norm2pix, pix2norm } from "./utils.js";
+import { projectPageBoundary, boundaryToPixels, drawPageBoundary } from "./page-boundary.js";
 
 /**
  * Computes the absolute angular distance between two angles, normalized to [0, π].
@@ -432,7 +433,10 @@ function computePageCorners(pageCoordsNorm, x_dir, y_dir) {
     getCorner(pageXMin, pageYMax),
   ];
 
-  return { corners, pageXMin, pageYMin };
+  const pageWidth = pageXMax - pageXMin;
+  const pageHeight = pageYMax - pageYMin;
+
+  return { corners, pageXMin, pageYMin, pageWidth, pageHeight };
 }
 
 function computeSpanCoordinates(spanPoints, x_dir, y_dir, pageXMin, pageYMin) {
@@ -459,7 +463,7 @@ function computeSpanCoordinates(spanPoints, x_dir, y_dir, pageXMin, pageYMin) {
  * @param {cv.Mat} pagemask
  * @param {Array<[number, number]>} page_outline
  * @param {Array<Array<[number, number]>>} spanPoints
- * @returns {{ corners: Array<[number, number]>, ycoords: Array<number>, xcoords: Array<Array<number>> }}
+ * @returns {{ corners: Array<[number, number]>, ycoords: Array<number>, xcoords: Array<Array<number>>, pageDims: Array<number> }}
  */
 export function keypointsFromSamples(
   name,
@@ -479,7 +483,7 @@ export function keypointsFromSamples(
   } = computeGlobalPageAxes(spanPoints);
 
   const pageCoordsNorm = pix2norm(pagemask, page_outline);
-  const { corners, pageXMin, pageYMin } = computePageCorners(
+  const { corners, pageXMin, pageYMin, pageWidth, pageHeight } = computePageCorners(
     pageCoordsNorm,
     x_dir,
     y_dir
@@ -512,7 +516,7 @@ export function keypointsFromSamples(
   DebugMetrics.add("keypoint_span_axes", spanAxes);
   DebugMetrics.add("keypoint_span_weights", spanWeights);
 
-  return { corners, ycoords, xcoords };
+  return { corners, ycoords, xcoords, pageDims: [pageWidth, pageHeight] };
 }
 
 async function visualizeSpans(name, small, pagemask, spans) {

@@ -122,7 +122,7 @@ export class WarpedImage {
     );
 
     console.log("  Getting keypoints...");
-    const { corners, ycoords, xcoords } = keypointsFromSamples(
+    const { corners, ycoords, xcoords, pageDims: keyPointPageDims } = keypointsFromSamples(
       this.stem,
       this.small,
       this.pagemask,
